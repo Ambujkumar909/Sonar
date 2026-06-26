@@ -1,0 +1,14 @@
+{
+  "name": "sonar-license-server",
+  "version": "1.0.0",
+  "description": "Standalone Ed25519 license server for Sonar — issue, revoke, extend, migrate machine-bound time-limited licenses.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1"
+  }
+}

@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+license-server/node_modules/
+
+# secrets — NEVER commit
+license-server/keys/
+ADMIN_CREDENTIALS.txt
+.env
+.env.*
+
+# runtime data (private to a deployment)
+data/
+sessions/
+auth/
+logs/
+license-server/data/
+
+# build artifacts
+src/license.jsc
+src/sessionManager.jsc
+
+# proprietary / local-only
+*.pdf
+
+# misc
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
