@@ -422,16 +422,9 @@ class SessionManager {
         if (!watchAll) {
           matchedW = numberWatch.find((w) => w && cand.some((c) =>
             c === w || (w.length >= 8 && c.endsWith(w)) || (c.length >= 8 && w.endsWith(c))))
-          if (!matchedW) {
-            // Surface what arrived (and which way) so the user knows what to add.
-            const tag = msg.key.fromMe ? 'you→' + phone : phone + '→you'
-            if (!s.seenUnmatched) s.seenUnmatched = new Set()
-            if (!s.seenUnmatched.has(phone)) {
-              s.seenUnmatched.add(phone)
-              this.log(id, 'info', 'direct', `Unmatched direct (${tag}) candidates=[${cand.join(',')}] — add the number to the Watchlist to capture it`)
-            }
-            continue
-          }
+          // Privacy: a message from a non-watchlisted number is silently ignored —
+          // never logged to Health (we don't reveal who messaged whom).
+          if (!matchedW) continue
         }
         // Label by the watchlist number so incoming + outgoing share ONE chat/file.
         const label = matchedW || phone
@@ -467,12 +460,10 @@ class SessionManager {
       // always lands in ONE file regardless of message direction.
       textlog.appendGroupLine({ groupName: fileBase, sender, text, tsSeconds: tsSec })
 
-      // keyword alert
+      // keyword alert — live toast only; message content is NOT written to the
+      // Health/audit log (privacy: Health stays operational-events only).
       const hit = keywords.find((k) => k && text.toLowerCase().includes(k))
-      if (hit) {
-        this.log(id, 'warn', 'keyword', `Keyword "${hit}" in ${chatName}: ${text.slice(0, 80)}`)
-        this.emit('alert', { id, keyword: hit, chatName, sender, text, ts: row.ts })
-      }
+      if (hit) this.emit('alert', { id, keyword: hit, chatName, sender, text, ts: row.ts })
 
       // live push to dashboard
       this.emit('message', { sessionId: id, ...row })
