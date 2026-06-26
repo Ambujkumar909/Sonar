@@ -390,9 +390,6 @@ function renderAbout() {
     ['🔐', 'RBAC + audit', 'Four roles, per-session access grants, and a full audit trail of every login and action.'],
     ['🔑', 'Licensed & hardened', 'Ed25519 machine-bound licensing, server-side enforcement, optional bytecode build.'],
   ]
-  const stats = [
-    ['0', 'messages ever sent'], ['&lt;3 min', 'worst-case recovery'], ['4', 'access roles'], ['136', 'automated tests passing'],
-  ]
   $('#aboutCard').innerHTML = `
   <div class="about">
     <div class="about-hero reveal">
@@ -404,10 +401,6 @@ function renderAbout() {
       <div class="about-badges">
         <span>🔭 Observe-only</span><span>♻️ Self-healing</span><span>🗂️ Permanent archive</span><span>🛡️ Audited</span>
       </div>
-    </div>
-
-    <div class="grid cols-4 about-stats">
-      ${stats.map(([n, l]) => `<div class="card stat"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('')}
     </div>
 
     <div class="grid cols-3">
