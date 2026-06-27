@@ -54,6 +54,7 @@
 
     <!-- DASHBOARD -->
     <section id="view-dashboard" class="view">
+      <div id="newGroupBanner" class="card hide" style="margin-top:0;margin-bottom:18px"></div>
       <div class="grid cols-3" id="statCards"></div>
       <div class="grid cols-2" style="margin-top:18px">
         <div class="card">
@@ -124,7 +125,13 @@
           <div class="field" style="flex:1"><label>Value</label><input class="in" id="watchValue" placeholder="Group name, or number like 919812345678" /></div>
           <button class="btn primary" id="addWatchBtn">＋ Add</button>
         </div>
-        <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">Tip: for a phone number, type the country code + number as <b>digits only</b> — e.g. <b>919812345678</b>. Don't add <b>+</b>, spaces, or any symbol. For a group, type its exact name.</p>
+        <div class="inline-form" id="groupPickRow" style="margin-top:10px">
+          <div class="field" style="flex:1"><label>Or pick a group from this session</label>
+            <select class="in" id="watchGroupSelect"><option value="">— fetch groups, then choose —</option></select>
+          </div>
+          <button class="btn" id="fetchGroupsBtn" type="button">⟳ Fetch groups</button>
+        </div>
+        <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">Tip: pick a <b>group</b> from the dropdown above (click <b>Fetch groups</b> after the session is linked) instead of typing it. For a phone number, type the country code + number as <b>digits only</b> — e.g. <b>919812345678</b> (no <b>+</b>, spaces, or symbols).</p>
       </div>
       <div class="card tablewrap"><table id="watchTable"></table></div>
     </section>

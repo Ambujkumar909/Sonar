@@ -165,6 +165,14 @@ app.get('/api/sessions/:id/messages', auth.requireSessionAccess, wrap(async (req
   ok(res, { messages: await store.chatMessages(req.params.id, req.query.jid, lim(req.query.limit, 300)) })
 }))
 app.get('/api/sessions/:id/groups', auth.requireSessionAccess, wrap(async (req, res) => ok(res, { groups: await store.listGroups(req.params.id) })))
+// Live group list (queries WhatsApp for all participating groups — read-only).
+app.get('/api/sessions/:id/groups/live', auth.requireSessionAccess, wrap(async (req, res) => {
+  try { ok(res, { groups: await manager.listLiveGroups(req.params.id) }) }
+  catch (e) {
+    if (e.code === 'NOT_CONNECTED') return bad(res, 'Session not connected — link & scan the QR first', 409)
+    return bad(res, 'Could not fetch groups — try again in a moment', 502)
+  }
+}))
 app.get('/api/sessions/:id/contacts', auth.requireSessionAccess, wrap(async (req, res) => ok(res, { contacts: await store.listContacts(req.params.id, lim(req.query.limit, 2000)) })))
 app.get('/api/search', wrap(async (req, res) => {
   if ((req.query.q || '').length >= 2) auth.audit(req, 'search', req.query.q)

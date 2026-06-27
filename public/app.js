@@ -9,7 +9,9 @@ const api = async (path, opts) => (await fetch('/api' + path, opts)).json()
 const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
 const del = (path) => api(path, { method: 'DELETE' })
 
-const state = { sessions: [], stats: {}, view: 'dashboard', chatSession: null, chatJid: null, feed: [] }
+const state = { sessions: [], stats: {}, view: 'dashboard', chatSession: null, chatJid: null, feed: [], newGroups: [] }
+try { state.newGroups = JSON.parse(localStorage.getItem('sonar.newGroups') || '[]') } catch { state.newGroups = [] }
+const saveNewGroups = () => { try { localStorage.setItem('sonar.newGroups', JSON.stringify(state.newGroups)) } catch {} }
 const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
 const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
 const initials = (s) => (s || '?').replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '#'
@@ -83,6 +85,13 @@ function initSocket() {
   })
   socket.on('alert', (a) => toast(`⚑ <b>${esc(a.keyword)}</b> in ${esc(a.chatName)}<br><span style="font-weight:500;color:var(--ink-soft)">${esc(a.text.slice(0, 90))}</span>`, 'alert'))
   socket.on('license', () => { refreshLicenseBanner(); if (state.view === 'license') render('license') })
+  socket.on('newgroup', (g) => {
+    if (state.newGroups.some(x => x.jid === g.jid && x.sessionId === g.sessionId)) return
+    state.newGroups.unshift(g); saveNewGroups()
+    const sname = (state.sessions.find(s => s.id === g.sessionId) || {}).name || 'a session'
+    toast(`👥 New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to add it to your watchlist.</span>`, 'alert')
+    renderNewGroupBanner()
+  })
 }
 
 /* ---------- top chrome (badge + health pill) — calm & silent ---------- */
@@ -160,6 +169,20 @@ async function renderDashboard() {
     <div class="topchat"><span class="tc-name">${esc(c.chat_name || '—')}</span><span class="tc-n">${c.n} msgs</span></div>
   `).join('') : '<div class="empty">No messages yet.</div>'
   renderFeed()
+  renderNewGroupBanner()
+}
+function renderNewGroupBanner() {
+  const el = $('#newGroupBanner'); if (!el) return
+  const nameById = Object.fromEntries(state.sessions.map(s => [s.id, s.name]))
+  if (!state.newGroups.length) { el.classList.add('hide'); el.innerHTML = ''; return }
+  el.classList.remove('hide')
+  el.innerHTML = `<h3 style="margin-bottom:12px">👥 New group${state.newGroups.length > 1 ? 's' : ''} joined <span class="pill" style="font-size:11.5px"><span class="dot warn"></span>${state.newGroups.length}</span></h3>
+    <div style="display:flex;flex-direction:column;gap:10px">${
+    state.newGroups.map(g => `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:12px">
+      <div style="flex:1;min-width:180px"><b>${esc(g.subject)}</b> <span style="color:var(--ink-faint);font-size:12.5px">· ${g.participants || 0} members · ${esc(nameById[g.sessionId] || g.sessionId)}</span></div>
+      <button class="btn primary" data-act="addgroupwatch" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">＋ Add to watchlist</button>
+      <button class="btn" data-act="dismissgroup" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">Dismiss</button>
+    </div>`).join('')}</div>`
 }
 function renderFeed() {
   const el = $('#liveFeed'); if (!el) return
@@ -344,6 +367,24 @@ $('#addWatchBtn').onclick = async () => {
   const sid = $('#watchSession').value, kind = $('#watchKind').value, value = $('#watchValue').value.trim()
   if (!sid || !value) return toast('Enter a value')
   await post('/watch', { sid, kind, value }); $('#watchValue').value = ''; toast('Added to watchlist'); renderWatchlist()
+}
+$('#fetchGroupsBtn').onclick = async () => {
+  const sid = $('#watchSession').value
+  if (!sid) return toast('Pick a session first')
+  const sel = $('#watchGroupSelect'); const btn = $('#fetchGroupsBtn')
+  btn.disabled = true; const label = btn.textContent; btn.textContent = '… fetching'
+  try {
+    const r = await api(`/sessions/${sid}/groups/live`)
+    if (!r.ok) return toast(r.error || 'Could not fetch groups', 'err')
+    if (!r.groups.length) { sel.innerHTML = '<option value="">No groups found</option>'; return toast('No groups on this session') }
+    sel.innerHTML = '<option value="">— choose a group —</option>' +
+      r.groups.map(g => `<option value="${esc(g.subject)}">${esc(g.subject)} (${g.participants})</option>`).join('')
+    toast(`Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''}`)
+  } finally { btn.disabled = false; btn.textContent = label }
+}
+$('#watchGroupSelect').onchange = (e) => {
+  if (!e.target.value) return
+  $('#watchKind').value = 'group'; $('#watchValue').value = e.target.value
 }
 
 /* ---------- KEYWORDS ---------- */
@@ -583,8 +624,23 @@ document.addEventListener('click', (e) => {
     case 'deluser': delUser(a.id); break
     case 'resetpw': resetPw(a.id, a.name); break
     case 'delgrant': delGrant(a.id); break
+    case 'addgroupwatch': addGroupWatch(a.sid, a.jid); break
+    case 'dismissgroup': dismissNewGroup(a.sid, a.jid); break
   }
 })
+function dropNewGroup(sid, jid) {
+  state.newGroups = state.newGroups.filter(g => !(g.jid === jid && g.sessionId === sid))
+  saveNewGroups(); renderNewGroupBanner()
+}
+window.dismissNewGroup = (sid, jid) => dropNewGroup(sid, jid)
+window.addGroupWatch = async (sid, jid) => {
+  const g = state.newGroups.find(x => x.jid === jid && x.sessionId === sid)
+  if (!g) return
+  const r = await post('/watch', { sid, kind: 'group', value: g.subject })
+  if (r && r.ok === false) return toast(r.error || 'Could not add', 'err')
+  dropNewGroup(sid, jid); toast(`Added <b>${esc(g.subject)}</b> to watchlist`)
+  if (state.view === 'watchlist') renderWatchlist()
+}
 
 /* ---------- AUTH FLOW ---------- */
 const isAdminish = () => state.me && (state.me.role === 'admin' || state.me.role === 'super_admin')

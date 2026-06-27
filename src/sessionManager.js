@@ -232,8 +232,8 @@ class SessionManager {
       sock.ev.on('messaging-history.set', (u) => this.onHistory(id, u))
       sock.ev.on('contacts.upsert', (cs) => this.onContacts(id, cs))
       sock.ev.on('contacts.update', (cs) => this.onContacts(id, cs))
-      sock.ev.on('groups.upsert', (gs) => this.onGroups(id, gs))
-      sock.ev.on('groups.update', (gs) => this.onGroups(id, gs))
+      sock.ev.on('groups.upsert', (gs) => this.onGroups(id, gs, true))
+      sock.ev.on('groups.update', (gs) => this.onGroups(id, gs, false))
       sock.ev.on('chats.upsert', (cs) => this.onChats(id, cs))
 
       this.armWatchdog(id)
@@ -264,6 +264,7 @@ class SessionManager {
     if (connection === 'open') {
       s.attempt = 0
       s.qrDataUrl = null
+      s.openedAt = Date.now() // used to suppress new-group alerts during initial sync
       const me = s.sock?.user
       store.touchOpen(id)
       store.setSessionMeta({
@@ -362,6 +363,30 @@ class SessionManager {
     } catch {
       return jid.split('@')[0]
     }
+  }
+
+  // Live-fetch every group the linked account participates in (read-only query —
+  // queries group metadata, never sends a message/receipt). Used by the
+  // Watchlist "pick a group" dropdown so users don't have to type exact names.
+  async listLiveGroups(id) {
+    const s = this.sessions.get(id)
+    if (!s || !s.sock || s.status !== 'open') {
+      const e = new Error('Session not connected'); e.code = 'NOT_CONNECTED'; throw e
+    }
+    const map = await s.sock.groupFetchAllParticipating()
+    const groups = Object.values(map || {}).map((g) => ({
+      jid: g.id,
+      subject: g.subject || g.id.split('@')[0],
+      participants: g.participants?.length || g.size || 0,
+    })).sort((a, b) => a.subject.localeCompare(b.subject))
+    for (const g of groups) {
+      s.groupCache?.set(g.jid, g.subject)
+      store.upsertGroup({
+        session_id: id, jid: g.jid, subject: g.subject,
+        description: '', owner: '', participants: g.participants, created_at: 0,
+      })
+    }
+    return groups
   }
 
   async onMessages(id, { messages, type }) {
@@ -489,17 +514,28 @@ class SessionManager {
     }
   }
 
-  async onGroups(id, groups) {
+  async onGroups(id, groups, isUpsert = false) {
     const s = this.sessions.get(id)
+    // Only alert about a genuine new join: groups.upsert (not metadata updates),
+    // after the initial post-connect sync settles, for a group we've never stored.
+    const synced = isUpsert && s?.openedAt && (Date.now() - s.openedAt > 20000)
     for (const g of groups || []) {
       if (!g.id) continue
       if (g.subject && s) s.groupCache.set(g.id, g.subject)
+      const isNew = synced ? !(await store.groupExists(id, g.id)) : false
       store.upsertGroup({
         session_id: id, jid: g.id, subject: g.subject || '',
         description: g.desc || '', owner: g.owner || '',
         participants: g.participants?.length || g.size || 0,
         created_at: (g.creation || 0) * 1000,
       })
+      if (isNew && g.subject) {
+        this.log(id, 'info', 'group', `Added to new group "${g.subject}"`)
+        this.emit('newgroup', {
+          sessionId: id, jid: g.id, subject: g.subject,
+          participants: g.participants?.length || g.size || 0, ts: Date.now(),
+        })
+      }
     }
     this.emit('groups', { id })
   }

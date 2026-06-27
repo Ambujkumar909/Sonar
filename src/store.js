@@ -180,6 +180,7 @@ module.exports = {
       ON CONFLICT (session_id,jid) DO UPDATE SET subject=$3, description=$4, participants=$6`,
     [r.session_id, r.jid, r.subject, r.description, r.owner, r.participants, r.created_at]),
   listGroups: (sid) => all(`SELECT * FROM groups WHERE session_id=$1 ORDER BY subject ASC`, [sid]),
+  groupExists: async (sid, jid) => (await all(`SELECT 1 FROM groups WHERE session_id=$1 AND jid=$2 LIMIT 1`, [sid, jid])).length > 0,
 
   // ---- watchlist / keywords ----
   addWatch: (sid, kind, value, label) => q(`INSERT INTO watchlist (session_id,kind,value,label,created_at) VALUES ($1,$2,$3,$4,$5)`, [sid, kind, value, label, Date.now()]),
