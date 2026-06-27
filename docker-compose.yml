@@ -1,0 +1,31 @@
+# Sonar — full stack (Postgres + app). All config comes from .env.
+#   1) cp .env.example .env   (edit it)
+#   2) docker compose up --build
+#   3) open http://localhost:4545
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - ./logs:/app/logs   # permanent .txt archives on the host
+
+volumes:
+  pgdata:

@@ -1,0 +1,65 @@
+// =============================================================
+//  Sonar — central configuration
+//  Read-only WhatsApp intelligence platform (Baileys core)
+// =============================================================
+require('dotenv').config() // load .env if present (local runs; no-op if absent)
+const path = require('path')
+
+const ROOT = path.join(__dirname, '..')
+
+module.exports = {
+  ROOT,
+  PORT: Number(process.env.PORT) || 4545,
+
+  // Storage — Postgres for ALL data (sessions, messages, users, WhatsApp auth…).
+  // Only the .txt archives remain on the filesystem.
+  DATABASE_URL: process.env.DATABASE_URL || 'postgres://sonar:sonar@localhost:5433/sonar',
+  DATA_DIR: process.env.SONAR_DATA_DIR || path.join(ROOT, 'data'),
+  LOG_DIR: process.env.SONAR_LOG_DIR || path.join(ROOT, 'logs'), // .txt logs stay on disk
+
+  // Locale / formatting (kept identical to the original logger)
+  LOCALE: process.env.LOCALE || 'en-IN',
+  TIME_AND_MESSAGE_ONLY: false,
+
+  // Retention: keep this many days of messages in the DB (the .txt files keep
+  // EVERYTHING forever as the permanent archive). Older DB rows are auto-purged.
+  RETAIN_DAYS: Number(process.env.RETAIN_DAYS) || 30,
+
+  // Abuse limits
+  MAX_SESSIONS: Number(process.env.MAX_SESSIONS) || 50, // cap concurrent device sessions
+  MAX_QUERY_LIMIT: 1000,      // hard ceiling for any ?limit= param
+
+  // Behaviour
+  READ_ONLY: true,            // hard guarantee — never send anything
+  SYNC_FULL_HISTORY: true,    // pull recent history on connect for the chat list
+  MARK_ONLINE: false,         // stay invisible — do not broadcast presence
+
+  // Reconnection engine — tuned so recovery is ALWAYS well under 3 minutes.
+  // No single backoff wait ever exceeds maxDelayMs, so once WhatsApp is
+  // reachable again we re-attach within seconds. Never miss a lead.
+  RECONNECT: {
+    baseDelayMs: 1000,
+    factor: 1.5,
+    maxDelayMs: 12000,        // hard ceiling per wait — recovery stays fast
+    jitter: 0.25,             // ±25% to avoid thundering-herd against WA edge
+    softFailLimit: 1000,      // effectively never stop retrying transient faults
+    cooldownMs: 15000,        // even the "long" pause is only 15s
+    watchdogMs: 10000,        // aggressive health check every 10s
+    connectingTimeoutMs: 45000, // stuck "connecting" > 45s -> force a fresh restart
+    staleOpenMs: 90000,       // "open" but silent > 90s -> proactive ping/restart
+  },
+
+  // Licensing — enforced only when LICENSE_SERVER_URL is set (empty = dev/off).
+  // Offline, key-based licensing (no server). Put a key in LICENSE_KEY to enforce;
+  // leave empty to run unrestricted (disabled).
+  LICENSE: {
+    key: (process.env.LICENSE_KEY || '').trim(),
+    offline: process.env.LICENSE_OFFLINE === '1' || !!(process.env.LICENSE_KEY || '').trim(),
+    evalSec: Number(process.env.LICENSE_EVAL_SEC) || 30, // local re-check cadence (expiry/rollback)
+  },
+
+  // Defaults for a brand-new session.
+  // STRICT: new sessions listen to NOTHING until groups/numbers are added to the
+  // watchlist. "Watch all" can only be enabled by a super_admin.
+  DEFAULT_WATCH_ALL_GROUPS: false,
+}
