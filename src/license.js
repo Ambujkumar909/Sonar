@@ -1,35 +1,31 @@
 // =============================================================
 //  Sonar — license client (hardened)
-//  - Ed25519 token verification (expiry/fingerprint can't be forged)
-//  - Machine-fingerprint binding (verified inside the signed token)
-//  - Server-authoritative time + monotonic anti-rollback
-//  - Mandatory heartbeat with a grace window (offline is NOT infinite)
-//  - Tamper-evident local state (AES-256-GCM, key bound to the machine)
-//  - Anti-replay (rejects tokens older than the last seen server time)
+//  Two modes:
+//   • offline : pre-signed Ed25519 keys with a baked-in expiry.
+//               No server. Verified locally; expiry + clock-rollback
+//               enforced. (LICENSE_OFFLINE=1)
+//   • server  : online activation + heartbeat + machine binding.
+//               (LICENSE_SERVER_URL=…)
+//   • off     : neither set → licensing disabled (dev).
+//  State lives in Postgres (kv), AES-256-GCM encrypted & machine-bound.
 //  Enforcement is server-side: when not active, all sessions are held.
 // =============================================================
-const fs = require('fs')
 const os = require('os')
-const path = require('path')
 const crypto = require('crypto')
 const cfg = require('./config')
+const store = require('./store')
 
-// Embedded license-server PUBLIC key (private key never leaves your server).
+// Embedded license PUBLIC key (private key signs keys offline, never ships).
 const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAjHBXja7My87P/Q6IuYPmrDi23XXs6GQz/72LzM4RlMk=
 -----END PUBLIC KEY-----`
 const PUBLIC_KEY = crypto.createPublicKey(PUBLIC_KEY_PEM)
-
-// App secret folded into the local-state encryption key. (For maximum
-// resistance, ship this module compiled to V8 bytecode — see LICENSE.md.)
 const APP_SECRET = 'S0nar::v1::4f2a9c7e-licence-binding-secret'
-
-const STATE_FILE = path.join(cfg.DATA_DIR, 'license.bin')
-const SKEW = 5 * 60 * 1000 // 5 min clock skew tolerance
+const KV_KEY = 'license:state'
+const SKEW = 5 * 60 * 1000
 
 const fromB64url = (s) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
 
-// ---- machine fingerprint ---------------------------------------------------
 function machineFingerprint() {
   const nics = os.networkInterfaces()
   let mac = ''
@@ -40,172 +36,151 @@ function machineFingerprint() {
     if (mac) break
   }
   const cpu = (os.cpus()[0] || {}).model || ''
-  const raw = [os.hostname(), os.platform(), os.arch(), cpu, os.cpus().length, mac].join('|')
-  return crypto.createHash('sha256').update(raw).digest('hex')
+  return crypto.createHash('sha256').update([os.hostname(), os.platform(), os.arch(), cpu, os.cpus().length, mac].join('|')).digest('hex')
 }
-function machineInfo() {
-  return { host: os.hostname(), platform: os.platform(), arch: os.arch(), cpus: os.cpus().length }
-}
+function machineInfo() { return { host: os.hostname(), platform: os.platform(), arch: os.arch(), cpus: os.cpus().length } }
 
-// ---- tamper-evident local state (AES-256-GCM, key bound to this machine) ---
-function stateKey(fp) {
-  return crypto.scryptSync(fp + '::' + APP_SECRET, 'sonar-license-salt', 32)
-}
-function saveState(state, fp) {
+// ---- tamper-evident, machine-bound state (stored in Postgres kv) ----------
+function stateKey(fp) { return crypto.scryptSync(fp + '::' + APP_SECRET, 'sonar-license-salt', 32) }
+async function saveState(state, fp) {
   const iv = crypto.randomBytes(12)
   const cipher = crypto.createCipheriv('aes-256-gcm', stateKey(fp), iv)
   const enc = Buffer.concat([cipher.update(JSON.stringify(state), 'utf8'), cipher.final()])
-  const tag = cipher.getAuthTag()
-  fs.writeFileSync(STATE_FILE, Buffer.concat([iv, tag, enc]))
+  await store.kvSet(KV_KEY, Buffer.concat([iv, cipher.getAuthTag(), enc]).toString('base64'))
 }
-function loadState(fp) {
+async function loadState(fp) {
   try {
-    const buf = fs.readFileSync(STATE_FILE)
+    const raw = await store.kvGet(KV_KEY); if (!raw) return null
+    const buf = Buffer.from(raw, 'base64')
     const iv = buf.subarray(0, 12), tag = buf.subarray(12, 28), enc = buf.subarray(28)
-    const decipher = crypto.createDecipheriv('aes-256-gcm', stateKey(fp), iv)
-    decipher.setAuthTag(tag)
-    const dec = Buffer.concat([decipher.update(enc), decipher.final()])
-    return JSON.parse(dec.toString('utf8'))
-  } catch { return null } // missing OR tampered OR wrong machine → no state
+    const d = crypto.createDecipheriv('aes-256-gcm', stateKey(fp), iv); d.setAuthTag(tag)
+    return JSON.parse(Buffer.concat([d.update(enc), d.final()]).toString('utf8'))
+  } catch { return null }
 }
 
-// ---- token verification ----------------------------------------------------
-function verifyToken(token, fp) {
-  if (!token || !token.includes('.')) return null
-  const [payloadB64, sigB64] = token.split('.')
-  const okSig = crypto.verify(null, Buffer.from(payloadB64), PUBLIC_KEY, fromB64url(sigB64))
-  if (!okSig) return null // signature forged/edited
-  let p
-  try { p = JSON.parse(fromB64url(payloadB64).toString('utf8')) } catch { return null }
-  if (p.fingerprint !== fp) return null // bound to a different machine
+// signature-verified token payloads
+function verifyToken(token, fp) { // server tokens carry a fingerprint
+  const p = verifySig(token); if (!p) return null
+  if (p.fingerprint !== fp) return null
   return p
 }
+function verifySig(token) { // offline keys: signature only
+  if (!token || !token.includes('.')) return null
+  const [p, s] = token.split('.')
+  if (!crypto.verify(null, Buffer.from(p), PUBLIC_KEY, fromB64url(s))) return null
+  try { return JSON.parse(fromB64url(p).toString('utf8')) } catch { return null }
+}
 
-// ============================================================================
 class License {
   constructor() {
     this.fp = machineFingerprint()
-    this.manager = null
-    this.status = 'unknown'
-    this.detail = ''
-    this.info = null // { plan, customer, expiresAt, revalidateBy }
-    this.lastServerTime = 0
+    this.mode = cfg.LICENSE.serverUrl ? 'server' : (cfg.LICENSE.offline ? 'offline' : 'off')
+    this.status = 'unknown'; this.detail = ''; this.info = null
+    this.lastServerTime = 0; this._revalidateBy = 0
   }
-
-  enabled() { return !!cfg.LICENSE.serverUrl }
-
-  // server-authoritative "now": never let a rewound local clock help
+  enabled() { return this.mode !== 'off' }
   effNow() { return Math.max(Date.now(), this.lastServerTime) }
 
-  init(manager) {
+  async init(manager) {
     this.manager = manager
-    if (!this.enabled()) { this.status = 'disabled'; return } // licensing off (dev)
-    const st = loadState(this.fp)
-    if (st) { this.applyState(st) }
-    else { this.status = 'unlicensed'; this.detail = 'No license activated on this machine' }
-    this.evaluate()
-    // network heartbeat (revalidate + revoke + server time)
-    this.heartbeat().catch(() => {})
-    clearInterval(this._hb)
-    this._hb = setInterval(() => this.heartbeat().catch(() => {}), cfg.LICENSE.heartbeatMin * 60 * 1000)
-    // local re-evaluation — catches expiry/grace BETWEEN heartbeats (no network)
+    if (!this.enabled()) { this.status = 'disabled'; return }
+    const st = await loadState(this.fp)
+    if (st) this.applyState(st)
+    else { this.status = 'unlicensed'; this.detail = 'No license activated' }
+    await this.evaluate()
+    if (this.mode === 'server') {
+      this.heartbeat().catch(() => {})
+      clearInterval(this._hb)
+      this._hb = setInterval(() => this.heartbeat().catch(() => {}), cfg.LICENSE.heartbeatMin * 60 * 1000)
+    }
     clearInterval(this._eval)
-    this._eval = setInterval(() => this.evaluate(), cfg.LICENSE.evalSec * 1000)
+    this._eval = setInterval(() => this.evaluate().catch(() => {}), cfg.LICENSE.evalSec * 1000)
   }
 
   applyState(st) {
-    this.key = st.key
-    this.token = st.token
+    this.key = st.key; this.token = st.token
     this.lastServerTime = Math.max(this.lastServerTime, st.lastServerTime || 0)
-    this._revalidateBy = st.revalidateBy || 0 // restore grace deadline across restarts
-    this.info = { plan: st.plan, customer: st.customer, expiresAt: st.expiresAt, revalidateBy: st.revalidateBy }
+    this._revalidateBy = st.revalidateBy || 0
+    this.info = { plan: st.plan, customer: st.customer, expiresAt: st.expiresAt }
   }
 
-  // Decide active/inactive from the current (verified) token + clocks.
-  evaluate() {
+  async evaluate() {
     if (!this.enabled()) { this.status = 'disabled'; return this.apply() }
-    if (!this.token) { this.status = this.status === 'tampered' ? 'tampered' : 'unlicensed'; return this.apply() }
-    const p = verifyToken(this.token, this.fp)
+    if (!this.token) { this.status = 'unlicensed'; return this.apply() }
+    const p = this.mode === 'offline' ? verifySig(this.token) : verifyToken(this.token, this.fp)
     if (!p) { this.status = 'invalid'; this.detail = 'License is invalid for this machine'; return this.apply() }
-    this.info = { plan: p.plan, customer: p.customer, expiresAt: p.expiresAt, revalidateBy: this._revalidateBy || p.expiresAt }
+    this.info = { plan: p.plan, customer: p.customer, expiresAt: p.expiresAt }
+    // monotonic anti-rollback: remember the highest time we've ever seen
+    if (this.effNow() > this.lastServerTime) { this.lastServerTime = this.effNow(); await this.persist(p) }
     const now = this.effNow()
     if (p.revoked) { this.status = 'revoked'; this.detail = 'License has been revoked' }
-    else if (p.expiresAt && now > p.expiresAt) { this.status = 'expired'; this.detail = 'License plan has expired' }
-    else if (this._revalidateBy && now > this._revalidateBy) { this.status = 'grace_over'; this.detail = 'Could not reach the license server within the allowed offline window' }
+    else if (p.expiresAt && now > p.expiresAt) { this.status = 'expired'; this.detail = 'License has expired' }
+    else if (this.mode === 'server' && this._revalidateBy && now > this._revalidateBy) { this.status = 'grace_over'; this.detail = 'License server unreachable past the offline window' }
     else { this.status = 'active'; this.detail = '' }
     this.apply()
   }
 
-  // push the hold state into the session manager
   apply() {
     const active = this.status === 'active' || this.status === 'disabled'
     if (this.manager) this.manager.setLicenseHeld(!active, this.status)
   }
 
+  async persist(p) {
+    await saveState({ key: this.key, token: this.token, lastServerTime: this.lastServerTime, plan: p?.plan, customer: p?.customer, expiresAt: p?.expiresAt, revalidateBy: this._revalidateBy }, this.fp)
+  }
+
   async activate(key) {
-    if (!this.enabled()) return { ok: false, error: 'licensing is disabled (no server configured)' }
+    key = String(key || '').trim()
+    if (!this.enabled()) return { ok: false, error: 'licensing is disabled' }
+    if (this.mode === 'offline') {
+      const p = verifySig(key)
+      if (!p) return { ok: false, error: 'invalid license key' }
+      this.token = key; this.key = null
+      this.lastServerTime = Math.max(this.lastServerTime, Date.now())
+      await this.persist(p); await this.evaluate()
+      return { ok: true, status: this.status }
+    }
     try {
-      const r = await this._post('/api/activate', { key: String(key).trim(), fingerprint: this.fp, info: machineInfo() })
+      const r = await this._post('/api/activate', { key, fingerprint: this.fp, info: machineInfo() })
       if (!r.ok) return r
-      this._ingest(r, String(key).trim())
-      this.evaluate()
+      await this._ingest(r, key); await this.evaluate()
       return { ok: true, status: this.status }
     } catch (e) { return { ok: false, error: 'cannot reach license server: ' + (e.message || e) } }
   }
 
   async heartbeat() {
-    if (!this.enabled() || !this.key) { this.evaluate(); return }
+    if (this.mode !== 'server' || !this.key) { await this.evaluate(); return }
     try {
       const r = await this._post('/api/heartbeat', { key: this.key, fingerprint: this.fp })
-      if (r.ok) this._ingest(r, this.key)
-      // if server says invalid/mismatch, surface it
-      else if (r.status) { this.detail = r.error || '' }
-    } catch { /* offline — rely on grace/expiry */ }
-    this.evaluate()
+      if (r.ok) await this._ingest(r, this.key)
+      else if (r.status) this.detail = r.error || ''
+    } catch {}
+    await this.evaluate()
   }
 
-  // accept a fresh server response: verify, anti-replay, persist
-  _ingest(r, key) {
-    const p = verifyToken(r.token, this.fp)
-    if (!p) { this.status = 'invalid'; return }
+  async _ingest(r, key) {
+    const p = verifyToken(r.token, this.fp); if (!p) { this.status = 'invalid'; return }
     const serverTime = Number(r.serverTime) || p.serverTime || 0
-    if (serverTime + SKEW < this.lastServerTime) return // anti-replay: stale token
+    if (serverTime + SKEW < this.lastServerTime) return // anti-replay
     this.lastServerTime = Math.max(this.lastServerTime, serverTime)
-    this.key = key
-    this.token = r.token
+    this.key = key; this.token = r.token
     this._revalidateBy = serverTime + cfg.LICENSE.graceHours * 3600 * 1000
-    saveState({
-      key, token: r.token, lastServerTime: this.lastServerTime,
-      plan: p.plan, customer: p.customer, expiresAt: p.expiresAt, revalidateBy: this._revalidateBy,
-    }, this.fp)
+    await this.persist(p)
   }
 
   async _post(pathname, body) {
     const url = cfg.LICENSE.serverUrl.replace(/\/$/, '') + pathname
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 12000)
-    try {
-      const res = await fetch(url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body), signal: ctrl.signal,
-      })
-      return await res.json()
-    } finally { clearTimeout(t) }
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000)
+    try { return await (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctrl.signal })).json() }
+    finally { clearTimeout(t) }
   }
 
   publicStatus() {
     return {
-      enabled: this.enabled(),
-      status: this.status,
-      detail: this.detail,
-      fingerprint: this.fp,
-      machine: machineInfo(),
-      plan: this.info?.plan || null,
-      customer: this.info?.customer || null,
-      expiresAt: this.info?.expiresAt || null,
-      revalidateBy: this._revalidateBy || null,
-      serverTime: this.lastServerTime || null,
-      graceHours: cfg.LICENSE.graceHours,
+      enabled: this.enabled(), mode: this.mode, status: this.status, detail: this.detail,
+      fingerprint: this.fp, machine: machineInfo(),
+      plan: this.info?.plan || null, customer: this.info?.customer || null,
+      expiresAt: this.info?.expiresAt || null, graceHours: cfg.LICENSE.graceHours,
     }
   }
 }

@@ -340,7 +340,7 @@ io.on('connection', async (socket) => {
     }
   }
   await auth.ensureBootstrapAdmin()
-  license.init(manager) // dormant unless licensing configured
+  await license.init(manager) // dormant unless licensing configured
   server.listen(cfg.PORT, () => {
     console.log(`\n  ⬡  Sonar running →  http://localhost:${cfg.PORT}`)
     console.log(`      database: Postgres · licensing: ${license.enabled() ? 'on (' + license.status + ')' : 'disabled (dev)'}\n`)

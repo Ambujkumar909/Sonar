@@ -28,3 +28,6 @@ src/sessionManager.jsc
 Thumbs.db
 .vscode/
 .idea/
+
+# generated offline license keys — keep private
+license-keys.txt
