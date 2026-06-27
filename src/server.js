@@ -67,13 +67,13 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   await store.createAuthSession({ token, user_id: user.id, username: user.username, ip: auth.ipOf(req), ua: req.headers['user-agent'] || '', login_at: Date.now(), last_seen: Date.now() })
   store.setLastLogin(user.id)
   store.logAudit({ user_id: user.id, username: user.username, action: 'login', target: '', detail: '', ip: auth.ipOf(req), ts: Date.now() })
-  auth.setAuthCookie(res, token)
+  auth.setAuthCookie(res, token, req.secure) // Secure flag when behind HTTPS
   ok(res, { user: { id: user.id, username: user.username, role: user.role } })
 }))
 
 app.post('/api/logout', wrap(async (req, res) => {
   const u = await auth.currentUser(req)
-  if (u) { store.closeAuthSession(u.token); auth.audit({ user: u, ip: () => '' }, 'logout') }
+  if (u) { store.closeAuthSession(u.token); req.user = u; auth.audit(req, 'logout') }
   auth.clearAuthCookie(res)
   ok(res, {})
 }))
@@ -168,7 +168,8 @@ app.get('/api/sessions/:id/groups', auth.requireSessionAccess, wrap(async (req, 
 app.get('/api/sessions/:id/contacts', auth.requireSessionAccess, wrap(async (req, res) => ok(res, { contacts: await store.listContacts(req.params.id, lim(req.query.limit, 2000)) })))
 app.get('/api/search', wrap(async (req, res) => {
   if ((req.query.q || '').length >= 2) auth.audit(req, 'search', req.query.q)
-  ok(res, { messages: await store.searchMessages(req.query.q || '', lim(req.query.limit, 300)) })
+  // RLS: managers/viewers only search within sessions granted to them
+  ok(res, { messages: await store.searchMessages(req.query.q || '', lim(req.query.limit, 300), await idsFor(req)) })
 }))
 
 // ---- watchlist & keywords --------------------------------------------------
@@ -185,11 +186,16 @@ app.post('/api/watch', auth.requireWrite, wrap(async (req, res) => {
   let { sid, kind, value, label } = req.body || {}
   if (!sid || !kind || !value) return bad(res, 'sid, kind, value required')
   if (!['group', 'number'].includes(kind)) return bad(res, "kind must be 'group' or 'number'")
+  if (!(await store.getSession(sid))) return bad(res, 'no such session', 404) // no orphan watch rows
   if (!(await store.canAccessSession(req.user, sid))) return bad(res, 'no access to this session', 403)
   value = String(value).trim()
-  if (kind === 'number') value = value.replace(/[^0-9]/g, '')
+  if (kind === 'number') {
+    if (/[a-z]/i.test(value)) return bad(res, 'phone number must be digits only (e.g. 919812345678)')
+    value = value.replace(/[^0-9]/g, '')
+    if (value.length < 7) return bad(res, 'phone number too short')
+  } else { value = value.slice(0, 100) }
   if (!value) return bad(res, 'value required')
-  await store.addWatch(sid, kind, value, String(label || value).trim()); auth.audit(req, 'watch.add', `${kind}:${value}`); ok(res, {})
+  await store.addWatch(sid, kind, value, String(label || value).trim().slice(0, 100)); auth.audit(req, 'watch.add', `${kind}:${value}`); ok(res, {})
 }))
 app.delete('/api/watch/:id', auth.requireWrite, wrap(async (req, res) => {
   const w = await store.getWatch(Number(req.params.id))
@@ -200,8 +206,11 @@ app.delete('/api/watch/:id', auth.requireWrite, wrap(async (req, res) => {
 
 app.get('/api/keywords', wrap(async (req, res) => ok(res, { keywords: await store.listKeywords() })))
 app.post('/api/keywords', auth.requireWrite, wrap(async (req, res) => {
-  if (!req.body.word) return bad(res, 'word required')
-  await store.addKeyword(String(req.body.word).trim()); auth.audit(req, 'keyword.add', req.body.word); ok(res, {})
+  const word = (typeof req.body?.word === 'string' ? req.body.word : '').trim().slice(0, 100)
+  if (!word) return bad(res, 'word required (text)')
+  const existing = await store.listKeywords()
+  if (existing.some((k) => k.word.toLowerCase() === word.toLowerCase())) return ok(res, {}) // idempotent — no duplicates
+  await store.addKeyword(word); auth.audit(req, 'keyword.add', word); ok(res, {})
 }))
 app.delete('/api/keywords/:id', auth.requireWrite, wrap(async (req, res) => { await store.delKeyword(Number(req.params.id)); auth.audit(req, 'keyword.del', req.params.id); ok(res, {}) }))
 
@@ -209,12 +218,18 @@ app.delete('/api/keywords/:id', auth.requireWrite, wrap(async (req, res) => { aw
 app.get('/api/stats', wrap(async (req, res) => ok(res, { stats: await store.stats(await idsFor(req)) })))
 app.get('/api/analytics', wrap(async (req, res) => {
   const ids = await idsFor(req)
-  ok(res, { hourly: await store.hourly(ids), topChats: await store.topChats(10, ids), stats: await store.stats(ids) })
+  const [hourly, topChats, stats] = await Promise.all([store.hourly(ids), store.topChats(10, ids), store.stats(ids)])
+  ok(res, { hourly, topChats, stats })
 }))
 app.get('/api/events', wrap(async (req, res) => ok(res, { events: await store.recentEvents(lim(req.query.limit, 300)) })))
 
 // ---- license ---------------------------------------------------------------
-app.get('/api/license/status', (req, res) => ok(res, { license: license.publicStatus() }))
+app.get('/api/license/status', (req, res) => {
+  const l = license.publicStatus()
+  // managers/viewers see only the banner essentials — not host/fingerprint
+  if (!auth.isAdminish(req.user.role)) { delete l.machine; delete l.fingerprint }
+  ok(res, { license: l })
+})
 app.post('/api/license/activate', auth.requireSuperAdmin, wrap(async (req, res) => {
   const r = await license.activate(req.body?.key || '')
   auth.audit(req, 'license.activate', '', r.ok ? r.status : r.error)
@@ -236,12 +251,14 @@ app.get('/api/users', auth.requireUserAdmin, wrap(async (req, res) => ok(res, { 
 app.post('/api/users', auth.requireUserAdmin, wrap(async (req, res) => {
   const { username, password, role } = req.body || {}
   if (!username || !password) return bad(res, 'username & password required')
+  const uname = String(username).trim().slice(0, 64)
+  if (!uname) return bad(res, 'username required')
   if (String(password).length < 6) return bad(res, 'password too short (min 6)')
   if (!auth.ROLES.includes(role)) return bad(res, 'invalid role')
-  if (await store.getUserByName(username)) return bad(res, 'username already exists')
+  if (await store.getUserByName(uname)) return bad(res, 'username already exists')
   const { hash, salt } = auth.hashPassword(String(password))
-  await store.createUser(String(username).trim(), hash, salt, role)
-  auth.audit(req, 'user.create', username, role); ok(res, {})
+  await store.createUser(uname, hash, salt, role)
+  auth.audit(req, 'user.create', uname, role); ok(res, {})
 }))
 app.delete('/api/users/:id', auth.requireUserAdmin, wrap(async (req, res) => {
   const target = await store.getUserById(Number(req.params.id))
@@ -288,8 +305,9 @@ app.post('/api/password', wrap(async (req, res) => {
 // ---- export ----------------------------------------------------------------
 app.get('/api/export/:id', auth.requireSessionAccess, wrap(async (req, res) => {
   const sid = req.params.id, jid = req.query.jid, fmt = req.query.fmt || 'txt'
-  auth.audit(req, 'export', jid || 'ALL', fmt)
-  const msgs = jid ? await store.chatMessages(sid, jid, 100000) : await store.searchMessages('', 100000)
+  if (!jid) return bad(res, 'jid required') // no global export — stay scoped to this chat
+  auth.audit(req, 'export', jid, fmt)
+  const msgs = await store.chatMessages(sid, jid, 100000)
   if (fmt === 'json') { res.setHeader('Content-Disposition', 'attachment; filename="sonar-export.json"'); return res.json(msgs) }
   res.setHeader('Content-Type', 'text/plain; charset=utf-8')
   res.setHeader('Content-Disposition', 'attachment; filename="sonar-export.txt"')
@@ -306,6 +324,9 @@ app.get('/api/logs', (req, res) => {
     ok(res, { files })
   } catch { ok(res, { files: [] }) }
 })
+
+// unmatched API routes → clean JSON 404 (not Express's default HTML)
+app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'not found' }))
 
 // ---- global error handler: never leak stack traces / paths -----------------
 app.use((err, req, res, next) => {

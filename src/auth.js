@@ -59,9 +59,10 @@ function getCookie(req, name) {
   return null
 }
 const TOKEN_COOKIE = 'sonar_token'
-function setAuthCookie(res, token) {
+function setAuthCookie(res, token, secure = false) {
+  // add Secure automatically when the request arrived over HTTPS (behind a proxy)
   res.setHeader('Set-Cookie',
-    `${TOKEN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${60 * 60 * 24 * 30}`)
+    `${TOKEN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${60 * 60 * 24 * 30}${secure ? '; Secure' : ''}`)
 }
 function clearAuthCookie(res) {
   res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`)

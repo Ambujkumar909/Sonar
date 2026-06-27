@@ -154,7 +154,11 @@ module.exports = {
   },
   allChats: (sid, limit = 2000) => all(`SELECT * FROM chats WHERE session_id=$1 AND watch_key IS NOT NULL ORDER BY last_ts DESC LIMIT $2`, [sid, limit]),
   chatMessages: async (sid, jid, limit = 200) => (await all(`SELECT * FROM messages WHERE session_id=$1 AND chat_jid=$2 ORDER BY ts DESC LIMIT $3`, [sid, jid, limit])).reverse(),
-  searchMessages: (qq, limit = 200) => all(`SELECT * FROM messages WHERE text ILIKE $1 ORDER BY ts DESC LIMIT $2`, ['%' + qq + '%', limit]),
+  searchMessages: (qq, limit = 200, ids) => {
+    if (ids && ids.length === 0) return []
+    if (ids) return all(`SELECT * FROM messages WHERE text ILIKE $1 AND session_id = ANY($2) ORDER BY ts DESC LIMIT $3`, ['%' + qq + '%', ids, limit])
+    return all(`SELECT * FROM messages WHERE text ILIKE $1 ORDER BY ts DESC LIMIT $2`, ['%' + qq + '%', limit])
+  },
   deleteChatLog: async (sid, jid) => {
     const row = (await one(`SELECT name FROM chats WHERE session_id=$1 AND jid=$2`, [sid, jid])) ||
       (await one(`SELECT chat_name AS name FROM messages WHERE session_id=$1 AND chat_jid=$2 LIMIT 1`, [sid, jid]))
@@ -198,15 +202,17 @@ module.exports = {
     const n = async (sql, p) => Number((await one(sql, p)).n)
     const filt = ids ? ` WHERE session_id = ANY($1)` : ''
     const a = ids ? [ids] : []
-    return {
-      sessions: ids ? ids.length : await n(`SELECT COUNT(*) n FROM sessions`),
-      sessionsOpen: await n(`SELECT COUNT(*) n FROM sessions WHERE status='open'${ids ? ` AND id = ANY($1)` : ''}`, a),
-      messages: await n(`SELECT COUNT(*) n FROM messages${filt}`, a),
-      messages24h: await n(`SELECT COUNT(*) n FROM messages WHERE ts>=$${ids ? 2 : 1}${ids ? ` AND session_id = ANY($1)` : ''}`, ids ? [ids, since] : [since]),
-      chats: await n(`SELECT COUNT(*) n FROM chats${filt}`, a),
-      groups: await n(`SELECT COUNT(*) n FROM groups${filt}`, a),
-      contacts: await n(`SELECT COUNT(*) n FROM contacts${filt}`, a),
-    }
+    // run all counts in parallel (was sequential — the throughput bottleneck)
+    const [sessions, sessionsOpen, messages, messages24h, chats, groups, contacts] = await Promise.all([
+      ids ? Promise.resolve(ids.length) : n(`SELECT COUNT(*) n FROM sessions`),
+      n(`SELECT COUNT(*) n FROM sessions WHERE status='open'${ids ? ` AND id = ANY($1)` : ''}`, a),
+      n(`SELECT COUNT(*) n FROM messages${filt}`, a),
+      n(`SELECT COUNT(*) n FROM messages WHERE ts>=$${ids ? 2 : 1}${ids ? ` AND session_id = ANY($1)` : ''}`, ids ? [ids, since] : [since]),
+      n(`SELECT COUNT(*) n FROM chats${filt}`, a),
+      n(`SELECT COUNT(*) n FROM groups${filt}`, a),
+      n(`SELECT COUNT(*) n FROM contacts${filt}`, a),
+    ])
+    return { sessions, sessionsOpen, messages, messages24h, chats, groups, contacts }
   },
   hourly: (ids) => {
     if (ids && ids.length === 0) return []
