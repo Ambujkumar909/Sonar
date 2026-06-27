@@ -2,6 +2,7 @@
 //  Sonar — central configuration
 //  Read-only WhatsApp intelligence platform (Baileys core)
 // =============================================================
+require('dotenv').config() // load .env if present (local runs; no-op if absent)
 const path = require('path')
 
 const ROOT = path.join(__dirname, '..')
