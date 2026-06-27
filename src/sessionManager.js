@@ -4,18 +4,17 @@
 //  - Never sends a message, receipt, or presence. Pure observer.
 //  - Self-healing: classified reconnects + watchdog, sub-3-min recovery.
 // =============================================================
-const fs = require('fs')
-const path = require('path')
 const QR = require('qrcode')
 const pino = require('pino')
 
 const baileys = require('@whiskeysockets/baileys')
 const makeWASocket = baileys.default
-const { useMultiFileAuthState, DisconnectReason, Browsers } = baileys
+const { Browsers } = baileys
 
 const cfg = require('./config')
 const store = require('./store')
 const textlog = require('./textlog')
+const { usePostgresAuthState } = require('./waauth')
 const { classify, backoff } = require('./reconnect')
 
 const SILENT = pino({ level: 'silent' })
@@ -63,10 +62,10 @@ class SessionManager {
   }
 
   // License enforcement: held = stop every session; released = resume them.
-  setLicenseHeld(held, status) {
+  async setLicenseHeld(held, status) {
     this.licenseStatus = status
     this.emit('license', { status })
-    if (held === this.licenseHeld) { this.emit('sessions', this.list()); return }
+    if (held === this.licenseHeld) { this.pushSessions(); return }
     this.licenseHeld = held
     if (held) {
       this.log('*', 'warn', 'license', `License ${status} — all sessions stopped`)
@@ -78,13 +77,12 @@ class SessionManager {
       }
     } else {
       this.log('*', 'success', 'license', 'License active — resuming sessions')
-      // resume every non-user-stopped session (start() re-creates auth/QR as needed)
-      for (const row of store.allSessions()) {
+      for (const row of await store.allSessions()) {
         if (row.status === 'stopped') continue
         this.start(row.id).catch(() => {})
       }
     }
-    this.emit('sessions', this.list())
+    this.pushSessions()
   }
 
   // Global backstop: independently of every per-session timer, sweep all
@@ -123,8 +121,9 @@ class SessionManager {
   }
 
   // ---- lifecycle --------------------------------------------------------
-  list() {
-    return store.allSessions().map((s) => {
+  async list() {
+    const rows = await store.allSessions()
+    return rows.map((s) => {
       const live = this.sessions.get(s.id)
       return {
         ...s,
@@ -136,14 +135,16 @@ class SessionManager {
     })
   }
 
+  // broadcast the session list to dashboards (fire-and-forget)
+  pushSessions() { this.list().then((l) => this.emit('sessions', l)).catch(() => {}) }
+
   // QR for a single session (fetched on demand, never broadcast in bulk)
   getQr(id) { return this.sessions.get(id)?.qrDataUrl || null }
 
   async createSession(id, name, ownerUserId = null) {
     id = (id || ('s' + Date.now())).replace(/[^a-z0-9_-]/gi, '')
     name = name || id
-    store.upsertSession({ id, name, status: 'starting', watch_all: cfg.DEFAULT_WATCH_ALL_GROUPS ? 1 : 0, created_at: Date.now(), owner_user_id: ownerUserId })
-    store.logEvent(id, 'info', 'create', `Session "${name}" created`)
+    await store.upsertSession({ id, name, status: 'starting', watch_all: cfg.DEFAULT_WATCH_ALL_GROUPS ? 1 : 0, created_at: Date.now(), owner_user_id: ownerUserId })
     this.log(id, 'info', 'create', `Session "${name}" created`)
     await this.start(id)
     return id
@@ -158,11 +159,9 @@ class SessionManager {
       try { s.sock?.end?.(new Error('deleted')) } catch {}
       this.sessions.delete(id)
     }
-    store.deleteSession(id)
-    const dir = path.join(cfg.SESSIONS_DIR, id)
-    try { fs.rmSync(dir, { recursive: true, force: true }) } catch {}
+    await store.deleteSession(id) // also clears wa_auth, chats, messages, grants
     this.log(id, 'warn', 'delete', 'Session deleted')
-    this.emit('sessions', this.list())
+    this.pushSessions()
   }
 
   // User-initiated stop. The ONLY way auto-reconnect is disabled.
@@ -193,8 +192,7 @@ class SessionManager {
 
   async logout(id) {
     // wipe creds so next start shows a fresh QR (does NOT send a logout to WA)
-    const dir = path.join(cfg.SESSIONS_DIR, id, 'auth')
-    try { fs.rmSync(dir, { recursive: true, force: true }) } catch {}
+    await store.waClear(id)
     this.log(id, 'warn', 'reauth', 'Credentials cleared — restart to re-pair')
     store.setSessionStatus(id, 'idle')
   }
@@ -214,9 +212,7 @@ class SessionManager {
     if (this.licenseHeld) { this.setStatus(id, 'held'); return } // gated by license
 
     try {
-      const authDir = path.join(cfg.SESSIONS_DIR, id, 'auth')
-      fs.mkdirSync(authDir, { recursive: true })
-      const { state, saveCreds } = await useMultiFileAuthState(authDir)
+      const { state, saveCreds } = await usePostgresAuthState(id) // creds/keys in Postgres
       s.saveCreds = saveCreds
 
       const sock = makeWASocket({
@@ -373,12 +369,12 @@ class SessionManager {
     const s = this.sessions.get(id)
     if (!s) return
     s.lastActivity = Date.now()
-    const sess = store.getSession(id)
+    const sess = await store.getSession(id)
     const watchAll = sess ? !!sess.watch_all : true
-    const watch = store.listWatch(id)
+    const watch = await store.listWatch(id)
     const groupWatch = watch.filter((w) => w.kind === 'group').map((w) => w.value)
     const numberWatch = watch.filter((w) => w.kind === 'number').map((w) => w.value.replace(/\D/g, ''))
-    const keywords = store.listKeywords().map((k) => k.word.toLowerCase())
+    const keywords = (await store.listKeywords()).map((k) => k.word.toLowerCase())
 
     for (const msg of messages) {
       if (!msg.message) continue
@@ -415,8 +411,8 @@ class SessionManager {
         // learn @lid -> phone whenever a message carries both forms
         const lidKey = String(jid).endsWith('@lid') ? String(jid).split('@')[0] : null
         const phoneCand = cand.find((c) => c.length >= 8)
-        if (lidKey && phoneCand) store.setLid(id, lidKey, phoneCand)
-        if (lidKey) { const mapped = store.getLid(id, lidKey); if (mapped) addNum(mapped) }
+        if (lidKey && phoneCand) await store.setLid(id, lidKey, phoneCand)
+        if (lidKey) { const mapped = await store.getLid(id, lidKey); if (mapped) addNum(mapped) }
         const phone = cand.find((c) => c.length >= 8) || cand[0] || String(jid).split('@')[0]
         let matchedW = null
         if (!watchAll) {
@@ -449,8 +445,8 @@ class SessionManager {
         quoted_text: quoted === '[non-text message]' ? '' : quoted,
         ts: tsSec * 1000, created_at: Date.now(),
       }
-      try { store.insertMsg(row) } catch {}
-      store.upsertChat({
+      try { await store.insertMsg(row) } catch {}
+      await store.upsertChat({
         session_id: id, jid: storeJid, name: chatName, is_group: isGroup ? 1 : 0,
         last_ts: tsSec * 1000, last_text: text, last_sender: sender, watch_key: watchKey,
       })
@@ -521,7 +517,7 @@ class SessionManager {
     if (s) s.status = status
     store.setSessionStatus(id, status)
     this.emit('status', { id, status })
-    this.emit('sessions', this.list())
+    this.pushSessions()
   }
 
   log(id, level, code, message) {
@@ -531,9 +527,8 @@ class SessionManager {
 
   // restore all known sessions on server boot
   async restoreAll() {
-    for (const row of store.allSessions()) {
-      // Respect a user-stopped session across restarts — keep it stopped,
-      // creds stay on disk, resume is one click away.
+    for (const row of await store.allSessions()) {
+      // Respect a user-stopped session across restarts — keep it stopped.
       if (row.status === 'stopped') {
         this.sessions.set(row.id, {
           id: row.id, status: 'stopped', terminated: true, userStopped: true,
@@ -542,9 +537,8 @@ class SessionManager {
         this.log(row.id, 'info', 'boot', 'Session is user-stopped — leaving offline')
         continue
       }
-      const authDir = path.join(cfg.SESSIONS_DIR, row.id, 'auth')
-      if (fs.existsSync(authDir)) {
-        this.log(row.id, 'info', 'boot', 'Restoring session on startup (creds on disk)')
+      if (await store.waHasCreds(row.id)) {
+        this.log(row.id, 'info', 'boot', 'Restoring session on startup (creds in Postgres)')
         this.start(row.id).catch(() => this.scheduleStart(row.id, 3000))
       } else {
         store.setSessionStatus(row.id, 'idle')

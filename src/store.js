@@ -1,442 +1,275 @@
 // =============================================================
-//  Lumen — persistence layer (SQLite via better-sqlite3)
-//  Stores sessions, chats, contacts, groups, messages, events.
-//  Synchronous + fast. WAL mode for concurrent reads.
+//  Sonar — persistence layer (PostgreSQL)
+//  Everything lives in Postgres now (sessions, chats, messages,
+//  users, audit, grants, watchlist, keywords, WhatsApp auth, kv).
+//  Only the .txt archives remain on the filesystem.
+//  All methods are async.
 // =============================================================
-const fs = require('fs')
-const Database = require('better-sqlite3')
-const { DATA_DIR, DB_FILE } = require('./config')
+const { Pool, types } = require('pg')
+const cfg = require('./config')
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
+// return BIGINT (int8) as a JS number — our ms-timestamps & ids fit in 2^53
+types.setTypeParser(20, (v) => (v === null ? null : parseInt(v, 10)))
 
-const db = new Database(DB_FILE)
-db.pragma('journal_mode = WAL')
-db.pragma('synchronous = NORMAL')
-db.pragma('foreign_keys = ON')
+const pool = new Pool({ connectionString: cfg.DATABASE_URL, max: 12 })
+pool.on('error', (e) => console.error('[pg pool]', e.message))
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS sessions (
-  id            TEXT PRIMARY KEY,
-  name          TEXT NOT NULL,
-  status        TEXT DEFAULT 'idle',
-  phone         TEXT,
-  platform      TEXT,
-  pushname      TEXT,
-  watch_all     INTEGER DEFAULT 1,
-  created_at    INTEGER,
-  last_open     INTEGER,
-  last_close    INTEGER,
-  reconnects    INTEGER DEFAULT 0,
-  note          TEXT,
-  owner_user_id INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS chats (
-  session_id    TEXT,
-  jid           TEXT,
-  name          TEXT,
-  is_group      INTEGER DEFAULT 0,
-  last_ts       INTEGER DEFAULT 0,
-  last_text     TEXT,
-  last_sender   TEXT,
-  unread        INTEGER DEFAULT 0,
-  msg_count     INTEGER DEFAULT 0,
-  pinned        INTEGER DEFAULT 0,
-  archived      INTEGER DEFAULT 0,
-  watch_key     TEXT,
-  PRIMARY KEY (session_id, jid)
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  msg_id        TEXT,
-  session_id    TEXT,
-  chat_jid      TEXT,
-  chat_name     TEXT,
-  is_group      INTEGER DEFAULT 0,
-  sender_jid    TEXT,
-  sender_name   TEXT,
-  from_me       INTEGER DEFAULT 0,
-  type          TEXT,
-  text          TEXT,
-  has_media     INTEGER DEFAULT 0,
-  quoted_text   TEXT,
-  ts            INTEGER,
-  created_at    INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(session_id, chat_jid, ts);
-CREATE INDEX IF NOT EXISTS idx_msg_ts   ON messages(ts);
-CREATE INDEX IF NOT EXISTS idx_msg_text ON messages(text);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_msg_unique ON messages(session_id, chat_jid, msg_id);
-
-CREATE TABLE IF NOT EXISTS contacts (
-  session_id    TEXT,
-  jid           TEXT,
-  name          TEXT,
-  notify        TEXT,
-  is_business   INTEGER DEFAULT 0,
-  PRIMARY KEY (session_id, jid)
-);
-
-CREATE TABLE IF NOT EXISTS groups (
-  session_id    TEXT,
-  jid           TEXT,
-  subject       TEXT,
-  description   TEXT,
-  owner         TEXT,
-  participants  INTEGER DEFAULT 0,
-  created_at    INTEGER,
-  PRIMARY KEY (session_id, jid)
-);
-
-CREATE TABLE IF NOT EXISTS watchlist (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id    TEXT,
-  kind          TEXT,        -- 'group' | 'number'
-  value         TEXT,        -- group subject / phone number
-  label         TEXT,
-  created_at    INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS keywords (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  word          TEXT,
-  created_at    INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS events (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id    TEXT,
-  level         TEXT,        -- info | warn | error | success
-  code          TEXT,
-  message       TEXT,
-  ts            INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
-
--- ===== security: users, auth sessions, audit trail =====
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  username      TEXT UNIQUE NOT NULL,
-  pass_hash     TEXT NOT NULL,
-  salt          TEXT NOT NULL,
-  role          TEXT DEFAULT 'admin',   -- admin | viewer
-  created_at    INTEGER,
-  last_login    INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS auth_sessions (
-  token         TEXT PRIMARY KEY,
-  user_id       INTEGER,
-  username      TEXT,
-  ip            TEXT,
-  ua            TEXT,
-  login_at      INTEGER,
-  last_seen     INTEGER,
-  logout_at     INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS audit (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id       INTEGER,
-  username      TEXT,
-  action        TEXT,
-  target        TEXT,
-  detail        TEXT,
-  ip            TEXT,
-  ts            INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
-`)
-
-// ---- migrations (MUST run before prepared statements below) ----------------
-db.exec(`CREATE TABLE IF NOT EXISTS watchlist (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, kind TEXT,
-  value TEXT, label TEXT, created_at INTEGER)`)
-db.exec(`CREATE TABLE IF NOT EXISTS session_grants (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER, session_id TEXT, granted_by TEXT, created_at INTEGER,
-  UNIQUE(user_id, session_id))`)
-// remembers @lid <-> phone associations so BOTH directions of a 1:1 chat match
-db.exec(`CREATE TABLE IF NOT EXISTS lidmap (
-  session_id TEXT, lid TEXT, phone TEXT, PRIMARY KEY(session_id, lid))`)
-
-function ensureColumn(table, col, def) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name)
-  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`)
-}
-ensureColumn('sessions', 'owner_user_id', 'INTEGER')
-ensureColumn('chats', 'watch_key', 'TEXT')
-
-// One-time data migration: drop empty history-imported chats (no messages);
-// backfill a watch_key for real captured chats so they stay visible.
-;(function migrateChats() {
-  const nulls = db.prepare(`SELECT session_id, jid, name, is_group FROM chats WHERE watch_key IS NULL`).all()
-  const hasMsg = db.prepare(`SELECT 1 FROM messages WHERE session_id=? AND chat_jid=? LIMIT 1`)
-  const del = db.prepare(`DELETE FROM chats WHERE session_id=? AND jid=?`)
-  const upd = db.prepare(`UPDATE chats SET watch_key=? WHERE session_id=? AND jid=?`)
-  for (const c of nulls) {
-    if (!hasMsg.get(c.session_id, c.jid)) { del.run(c.session_id, c.jid); continue }
-    const key = c.is_group ? 'g:' + (c.name || '') : 'n:' + String(c.jid).split('@')[0].replace(/\D/g, '')
-    upd.run(key, c.session_id, c.jid)
-  }
-})()
-
+const q = (text, params) => pool.query(text, params)
+const one = async (text, params) => (await pool.query(text, params)).rows[0] || null
+const all = async (text, params) => (await pool.query(text, params)).rows
 const ADMINISH = new Set(['super_admin', 'admin'])
 
-// ---- prepared statements -------------------------------------------------
-const S = {
-  upsertSession: db.prepare(`
-    INSERT INTO sessions (id,name,status,watch_all,created_at,owner_user_id)
-    VALUES (@id,@name,@status,@watch_all,@created_at,@owner_user_id)
-    ON CONFLICT(id) DO UPDATE SET name=@name`),
-  setSessionStatus: db.prepare(`UPDATE sessions SET status=? WHERE id=?`),
-  setSessionMeta: db.prepare(`
-    UPDATE sessions SET phone=@phone, platform=@platform, pushname=@pushname WHERE id=@id`),
-  touchOpen: db.prepare(`UPDATE sessions SET last_open=?, status='open' WHERE id=?`),
-  touchClose: db.prepare(`UPDATE sessions SET last_close=?, reconnects=reconnects+1 WHERE id=?`),
-  setWatchAll: db.prepare(`UPDATE sessions SET watch_all=? WHERE id=?`),
-  delSession: db.prepare(`DELETE FROM sessions WHERE id=?`),
-  getSession: db.prepare(`SELECT * FROM sessions WHERE id=?`),
-  allSessions: db.prepare(`SELECT * FROM sessions ORDER BY created_at ASC`),
-
-  upsertChat: db.prepare(`
-    INSERT INTO chats (session_id,jid,name,is_group,last_ts,last_text,last_sender,msg_count,watch_key)
-    VALUES (@session_id,@jid,@name,@is_group,@last_ts,@last_text,@last_sender,1,@watch_key)
-    ON CONFLICT(session_id,jid) DO UPDATE SET
-      name=COALESCE(@name,name),
-      is_group=@is_group,
-      last_ts=MAX(last_ts,@last_ts),
-      last_text=@last_text,
-      last_sender=@last_sender,
-      watch_key=COALESCE(@watch_key,watch_key),
-      msg_count=msg_count+1`),
-  renameChat: db.prepare(`UPDATE chats SET name=? WHERE session_id=? AND jid=?`),
-
-  insertMsg: db.prepare(`
-    INSERT OR IGNORE INTO messages
-      (msg_id,session_id,chat_jid,chat_name,is_group,sender_jid,sender_name,from_me,type,text,has_media,quoted_text,ts,created_at)
-    VALUES (@msg_id,@session_id,@chat_jid,@chat_name,@is_group,@sender_jid,@sender_name,@from_me,@type,@text,@has_media,@quoted_text,@ts,@created_at)`),
-
-  upsertContact: db.prepare(`
-    INSERT INTO contacts (session_id,jid,name,notify,is_business)
-    VALUES (@session_id,@jid,@name,@notify,@is_business)
-    ON CONFLICT(session_id,jid) DO UPDATE SET
-      name=COALESCE(@name,name), notify=COALESCE(@notify,notify)`),
-
-  upsertGroup: db.prepare(`
-    INSERT INTO groups (session_id,jid,subject,description,owner,participants,created_at)
-    VALUES (@session_id,@jid,@subject,@description,@owner,@participants,@created_at)
-    ON CONFLICT(session_id,jid) DO UPDATE SET
-      subject=@subject, description=@description, participants=@participants`),
-
-  addWatch: db.prepare(`INSERT INTO watchlist (session_id,kind,value,label,created_at) VALUES (?,?,?,?,?)`),
-  delWatch: db.prepare(`DELETE FROM watchlist WHERE id=?`),
-  listWatch: db.prepare(`SELECT * FROM watchlist WHERE session_id=? OR session_id='*' ORDER BY created_at DESC`),
-  allWatch: db.prepare(`SELECT * FROM watchlist ORDER BY created_at DESC`),
-
-  addKeyword: db.prepare(`INSERT INTO keywords (word,created_at) VALUES (?,?)`),
-  delKeyword: db.prepare(`DELETE FROM keywords WHERE id=?`),
-  listKeywords: db.prepare(`SELECT * FROM keywords ORDER BY word ASC`),
-
-  logEvent: db.prepare(`INSERT INTO events (session_id,level,code,message,ts) VALUES (?,?,?,?,?)`),
-  recentEvents: db.prepare(`SELECT * FROM events ORDER BY id DESC LIMIT ?`),
+// ---- schema ---------------------------------------------------------------
+async function init() {
+  await q(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT DEFAULT 'idle',
+    phone TEXT, platform TEXT, pushname TEXT, watch_all INT DEFAULT 0,
+    created_at BIGINT, last_open BIGINT, last_close BIGINT, reconnects INT DEFAULT 0,
+    note TEXT, owner_user_id INT
+  );
+  CREATE TABLE IF NOT EXISTS chats (
+    session_id TEXT, jid TEXT, name TEXT, is_group INT DEFAULT 0,
+    last_ts BIGINT DEFAULT 0, last_text TEXT, last_sender TEXT, unread INT DEFAULT 0,
+    msg_count INT DEFAULT 0, pinned INT DEFAULT 0, archived INT DEFAULT 0, watch_key TEXT,
+    PRIMARY KEY (session_id, jid)
+  );
+  CREATE TABLE IF NOT EXISTS messages (
+    id BIGSERIAL PRIMARY KEY, msg_id TEXT, session_id TEXT, chat_jid TEXT, chat_name TEXT,
+    is_group INT DEFAULT 0, sender_jid TEXT, sender_name TEXT, from_me INT DEFAULT 0,
+    type TEXT, text TEXT, has_media INT DEFAULT 0, quoted_text TEXT, ts BIGINT, created_at BIGINT
+  );
+  CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(session_id, chat_jid, ts);
+  CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(ts);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_msg_unique ON messages(session_id, chat_jid, msg_id);
+  CREATE TABLE IF NOT EXISTS contacts (
+    session_id TEXT, jid TEXT, name TEXT, notify TEXT, is_business INT DEFAULT 0,
+    PRIMARY KEY (session_id, jid)
+  );
+  CREATE TABLE IF NOT EXISTS groups (
+    session_id TEXT, jid TEXT, subject TEXT, description TEXT, owner TEXT,
+    participants INT DEFAULT 0, created_at BIGINT, PRIMARY KEY (session_id, jid)
+  );
+  CREATE TABLE IF NOT EXISTS watchlist (
+    id SERIAL PRIMARY KEY, session_id TEXT, kind TEXT, value TEXT, label TEXT, created_at BIGINT
+  );
+  CREATE TABLE IF NOT EXISTS keywords (
+    id SERIAL PRIMARY KEY, word TEXT, created_at BIGINT
+  );
+  CREATE TABLE IF NOT EXISTS events (
+    id SERIAL PRIMARY KEY, session_id TEXT, level TEXT, code TEXT, message TEXT, ts BIGINT
+  );
+  CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+  CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, pass_hash TEXT NOT NULL,
+    salt TEXT NOT NULL, role TEXT DEFAULT 'admin', created_at BIGINT, last_login BIGINT
+  );
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    token TEXT PRIMARY KEY, user_id INT, username TEXT, ip TEXT, ua TEXT,
+    login_at BIGINT, last_seen BIGINT, logout_at BIGINT
+  );
+  CREATE TABLE IF NOT EXISTS audit (
+    id BIGSERIAL PRIMARY KEY, user_id INT, username TEXT, action TEXT, target TEXT,
+    detail TEXT, ip TEXT, ts BIGINT
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
+  CREATE TABLE IF NOT EXISTS session_grants (
+    id SERIAL PRIMARY KEY, user_id INT, session_id TEXT, granted_by TEXT, created_at BIGINT,
+    UNIQUE(user_id, session_id)
+  );
+  CREATE TABLE IF NOT EXISTS lidmap (
+    session_id TEXT, lid TEXT, phone TEXT, PRIMARY KEY(session_id, lid)
+  );
+  CREATE TABLE IF NOT EXISTS wa_auth (
+    session_id TEXT, id TEXT, value TEXT, PRIMARY KEY(session_id, id)
+  );
+  CREATE TABLE IF NOT EXISTS kv ( k TEXT PRIMARY KEY, v TEXT );
+  `)
 }
 
 module.exports = {
-  db,
+  pool, init,
 
-  // sessions
-  upsertSession: (r) => S.upsertSession.run({ owner_user_id: null, ...r }),
-  setSessionOwner: (id, uid) => db.prepare(`UPDATE sessions SET owner_user_id=? WHERE id=?`).run(uid, id),
-  // RLS: super_admin/admin see all; manager/viewer only granted sessions
-  canAccessSession: (user, id) => {
+  // ---- sessions ----
+  upsertSession: (r) => q(
+    `INSERT INTO sessions (id,name,status,watch_all,created_at,owner_user_id)
+     VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE SET name=$2`,
+    [r.id, r.name, r.status, r.watch_all, r.created_at, r.owner_user_id ?? null]),
+  setSessionStatus: (id, s) => q(`UPDATE sessions SET status=$1 WHERE id=$2`, [s, id]),
+  setSessionMeta: (r) => q(`UPDATE sessions SET phone=$1, platform=$2, pushname=$3 WHERE id=$4`, [r.phone, r.platform, r.pushname, r.id]),
+  touchOpen: (id) => q(`UPDATE sessions SET last_open=$1, status='open' WHERE id=$2`, [Date.now(), id]),
+  touchClose: (id) => q(`UPDATE sessions SET last_close=$1, reconnects=reconnects+1 WHERE id=$2`, [Date.now(), id]),
+  setWatchAll: (id, v) => q(`UPDATE sessions SET watch_all=$1 WHERE id=$2`, [v ? 1 : 0, id]),
+  setSessionOwner: (id, uid) => q(`UPDATE sessions SET owner_user_id=$1 WHERE id=$2`, [uid, id]),
+  getSession: (id) => one(`SELECT * FROM sessions WHERE id=$1`, [id]),
+  allSessions: () => all(`SELECT * FROM sessions ORDER BY created_at ASC`),
+  deleteSession: async (id) => {
+    for (const t of ['chats', 'messages', 'contacts', 'groups', 'session_grants', 'wa_auth']) {
+      await q(`DELETE FROM ${t} WHERE session_id=$1`, [id])
+    }
+    await q(`DELETE FROM sessions WHERE id=$1`, [id])
+  },
+
+  // ---- RLS ----
+  canAccessSession: async (user, id) => {
     if (!user) return false
     if (ADMINISH.has(user.role)) return true
-    const g = db.prepare(`SELECT 1 FROM session_grants WHERE user_id=? AND session_id=?`).get(user.id, id)
+    const g = await one(`SELECT 1 FROM session_grants WHERE user_id=$1 AND session_id=$2`, [user.id, id])
     return !!g
   },
-  ownedSessionIds: (user) => {
+  ownedSessionIds: async (user) => {
     if (!user) return []
-    if (ADMINISH.has(user.role)) return db.prepare(`SELECT id FROM sessions`).all().map((r) => r.id)
-    return db.prepare(`SELECT session_id FROM session_grants WHERE user_id=?`).all(user.id).map((r) => r.session_id)
+    if (ADMINISH.has(user.role)) return (await all(`SELECT id FROM sessions`)).map((r) => r.id)
+    return (await all(`SELECT session_id FROM session_grants WHERE user_id=$1`, [user.id])).map((r) => r.session_id)
   },
 
   // ---- grants ----
-  addGrant: (uid, sid, by) => db.prepare(`INSERT OR IGNORE INTO session_grants (user_id,session_id,granted_by,created_at) VALUES (?,?,?,?)`).run(uid, sid, by, Date.now()),
-  delGrant: (id) => db.prepare(`DELETE FROM session_grants WHERE id=?`).run(id),
-  listGrants: () => db.prepare(`
-    SELECT g.id, g.user_id, g.session_id, g.granted_by, g.created_at,
-           u.username, u.role, s.name AS session_name
-    FROM session_grants g
-    LEFT JOIN users u ON u.id=g.user_id
-    LEFT JOIN sessions s ON s.id=g.session_id
-    ORDER BY g.created_at DESC`).all(),
-  grantsForUser: (uid) => db.prepare(`SELECT session_id FROM session_grants WHERE user_id=?`).all(uid).map((r) => r.session_id),
-  setSessionStatus: (id, s) => S.setSessionStatus.run(s, id),
-  setSessionMeta: (r) => S.setSessionMeta.run(r),
-  touchOpen: (id) => S.touchOpen.run(Date.now(), id),
-  touchClose: (id) => S.touchClose.run(Date.now(), id),
-  setWatchAll: (id, v) => S.setWatchAll.run(v ? 1 : 0, id),
-  deleteSession: (id) => {
-    S.delSession.run(id)
-    db.prepare(`DELETE FROM chats WHERE session_id=?`).run(id)
-    db.prepare(`DELETE FROM messages WHERE session_id=?`).run(id)
-    db.prepare(`DELETE FROM contacts WHERE session_id=?`).run(id)
-    db.prepare(`DELETE FROM groups WHERE session_id=?`).run(id)
-    db.prepare(`DELETE FROM session_grants WHERE session_id=?`).run(id)
-  },
-  getSession: (id) => S.getSession.get(id),
-  allSessions: () => S.allSessions.all(),
+  addGrant: (uid, sid, by) => q(`INSERT INTO session_grants (user_id,session_id,granted_by,created_at) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id,session_id) DO NOTHING`, [uid, sid, by, Date.now()]),
+  delGrant: (id) => q(`DELETE FROM session_grants WHERE id=$1`, [id]),
+  listGrants: () => all(`SELECT g.id, g.user_id, g.session_id, g.granted_by, g.created_at,
+      u.username, u.role, s.name AS session_name
+      FROM session_grants g LEFT JOIN users u ON u.id=g.user_id LEFT JOIN sessions s ON s.id=g.session_id
+      ORDER BY g.created_at DESC`),
+  grantsForUser: async (uid) => (await all(`SELECT session_id FROM session_grants WHERE user_id=$1`, [uid])).map((r) => r.session_id),
 
-  // chats / messages
-  upsertChat: (r) => S.upsertChat.run({ watch_key: null, ...r }),
-  renameChat: (name, sid, jid) => S.renameChat.run(name, sid, jid),
-  insertMsg: (r) => S.insertMsg.run(r),
-  upsertContact: (r) => S.upsertContact.run(r),
-  upsertGroup: (r) => S.upsertGroup.run(r),
-
-  // watchlist / keywords
-  addWatch: (sid, kind, value, label) => S.addWatch.run(sid, kind, value, label, Date.now()),
-  delWatch: (id) => S.delWatch.run(id),
-  listWatch: (sid) => (sid ? S.listWatch.all(sid) : S.allWatch.all()),
-  getWatch: (id) => db.prepare(`SELECT * FROM watchlist WHERE id=?`).get(id),
-  listWatchScoped: (sessionIds) => {
-    if (!sessionIds || sessionIds.length === 0) return []
-    const ph = sessionIds.map(() => '?').join(',')
-    return db.prepare(`SELECT * FROM watchlist WHERE session_id IN (${ph}) ORDER BY created_at DESC`).all(...sessionIds)
-  },
-  addKeyword: (w) => S.addKeyword.run(w, Date.now()),
-  delKeyword: (id) => S.delKeyword.run(id),
-  listKeywords: () => S.listKeywords.all(),
-
-  // events
-  logEvent: (sid, level, code, message) => S.logEvent.run(sid, level, code || '', message, Date.now()),
-  recentEvents: (n = 200) => S.recentEvents.all(n),
-
-  // ---- query helpers used by the API -----------------------------------
-  // Recent = only chats whose watch_key is still in the active watchlist.
+  // ---- chats / messages ----
+  upsertChat: (r) => q(
+    `INSERT INTO chats (session_id,jid,name,is_group,last_ts,last_text,last_sender,msg_count,watch_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8)
+     ON CONFLICT (session_id,jid) DO UPDATE SET
+       name=COALESCE($3,chats.name), is_group=$4, last_ts=GREATEST(chats.last_ts,$5),
+       last_text=$6, last_sender=$7, watch_key=COALESCE($8,chats.watch_key),
+       msg_count=chats.msg_count+1`,
+    [r.session_id, r.jid, r.name, r.is_group, r.last_ts, r.last_text, r.last_sender, r.watch_key ?? null]),
+  insertMsg: (r) => q(
+    `INSERT INTO messages (msg_id,session_id,chat_jid,chat_name,is_group,sender_jid,sender_name,from_me,type,text,has_media,quoted_text,ts,created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     ON CONFLICT (session_id,chat_jid,msg_id) DO NOTHING`,
+    [r.msg_id, r.session_id, r.chat_jid, r.chat_name, r.is_group, r.sender_jid, r.sender_name, r.from_me, r.type, r.text, r.has_media, r.quoted_text, r.ts, r.created_at]),
+  getChatName: async (sid, jid) => { const r = await one(`SELECT name FROM chats WHERE session_id=$1 AND jid=$2`, [sid, jid]); return r ? r.name : null },
   recentChats: (sid, limit = 100, keys = null) => {
-    if (keys === null) return db.prepare(`SELECT * FROM chats WHERE session_id=? ORDER BY last_ts DESC LIMIT ?`).all(sid, limit)
+    if (keys === null) return all(`SELECT * FROM chats WHERE session_id=$1 ORDER BY last_ts DESC LIMIT $2`, [sid, limit])
     if (keys.length === 0) return []
-    const ph = keys.map(() => '?').join(',')
-    return db.prepare(`SELECT * FROM chats WHERE session_id=? AND watch_key IN (${ph}) ORDER BY last_ts DESC LIMIT ?`).all(sid, ...keys, limit)
+    return all(`SELECT * FROM chats WHERE session_id=$1 AND watch_key = ANY($2) ORDER BY last_ts DESC LIMIT $3`, [sid, keys, limit])
   },
-  setLid: (sid, lid, phone) => { try { db.prepare(`INSERT INTO lidmap (session_id,lid,phone) VALUES (?,?,?) ON CONFLICT(session_id,lid) DO UPDATE SET phone=excluded.phone`).run(sid, lid, phone) } catch {} },
-  getLid: (sid, lid) => { const r = db.prepare(`SELECT phone FROM lidmap WHERE session_id=? AND lid=?`).get(sid, lid); return r ? r.phone : null },
-
-  getChatName: (sid, jid) => {
-    const r = db.prepare(`SELECT name FROM chats WHERE session_id=? AND jid=?`).get(sid, jid)
-    return r ? r.name : null
-  },
-
-  // Logs = the full permanent archive (everything ever captured, even after
-  // it was removed from the watchlist). Only real captured chats (have a key).
-  allChats: (sid, limit = 2000) =>
-    db.prepare(`SELECT * FROM chats WHERE session_id=? AND watch_key IS NOT NULL ORDER BY last_ts DESC LIMIT ?`).all(sid, limit),
-  // Retention: purge DB rows older than N days. The .txt archive is untouched,
-  // so nothing is truly lost. Returns the number of messages removed.
-  cleanupOld: (days = 30) => {
-    const cutoff = Date.now() - days * 24 * 3600 * 1000
-    const r = db.prepare(`DELETE FROM messages WHERE ts < ?`).run(cutoff)
-    // drop chats that no longer have any messages
-    db.prepare(`DELETE FROM chats WHERE last_ts < ? AND jid NOT IN
-      (SELECT DISTINCT chat_jid FROM messages WHERE session_id = chats.session_id)`).run(cutoff)
-    db.prepare(`DELETE FROM events WHERE ts < ?`).run(cutoff)
-    return r.changes
-  },
-
-  // Delete a chat's entire log (messages + chat row). Returns the chat name.
-  deleteChatLog: (sid, jid) => {
-    const row = db.prepare(`SELECT name FROM chats WHERE session_id=? AND jid=?`).get(sid, jid) ||
-      db.prepare(`SELECT chat_name AS name FROM messages WHERE session_id=? AND chat_jid=? LIMIT 1`).get(sid, jid)
-    db.prepare(`DELETE FROM messages WHERE session_id=? AND chat_jid=?`).run(sid, jid)
-    db.prepare(`DELETE FROM chats WHERE session_id=? AND jid=?`).run(sid, jid)
+  allChats: (sid, limit = 2000) => all(`SELECT * FROM chats WHERE session_id=$1 AND watch_key IS NOT NULL ORDER BY last_ts DESC LIMIT $2`, [sid, limit]),
+  chatMessages: async (sid, jid, limit = 200) => (await all(`SELECT * FROM messages WHERE session_id=$1 AND chat_jid=$2 ORDER BY ts DESC LIMIT $3`, [sid, jid, limit])).reverse(),
+  searchMessages: (qq, limit = 200) => all(`SELECT * FROM messages WHERE text ILIKE $1 ORDER BY ts DESC LIMIT $2`, ['%' + qq + '%', limit]),
+  deleteChatLog: async (sid, jid) => {
+    const row = (await one(`SELECT name FROM chats WHERE session_id=$1 AND jid=$2`, [sid, jid])) ||
+      (await one(`SELECT chat_name AS name FROM messages WHERE session_id=$1 AND chat_jid=$2 LIMIT 1`, [sid, jid]))
+    await q(`DELETE FROM messages WHERE session_id=$1 AND chat_jid=$2`, [sid, jid])
+    await q(`DELETE FROM chats WHERE session_id=$1 AND jid=$2`, [sid, jid])
     return row ? row.name : null
   },
-  chatMessages: (sid, jid, limit = 200) =>
-    db.prepare(`SELECT * FROM messages WHERE session_id=? AND chat_jid=? ORDER BY ts DESC LIMIT ?`)
-      .all(sid, jid, limit).reverse(),
-  searchMessages: (q, limit = 200) =>
-    db.prepare(`SELECT * FROM messages WHERE text LIKE ? ORDER BY ts DESC LIMIT ?`)
-      .all('%' + q + '%', limit),
-  listGroups: (sid) =>
-    db.prepare(`SELECT * FROM groups WHERE session_id=? ORDER BY subject ASC`).all(sid),
-  listContacts: (sid, limit = 1000) =>
-    db.prepare(`SELECT * FROM contacts WHERE session_id=? ORDER BY name ASC LIMIT ?`).all(sid, limit),
 
-  // stats — pass ids=undefined for ALL (admins), or an array to scope (RLS).
-  stats: (ids) => {
-    const since = Date.now() - 24 * 3600 * 1000
+  // ---- lid map ----
+  setLid: (sid, lid, phone) => q(`INSERT INTO lidmap (session_id,lid,phone) VALUES ($1,$2,$3) ON CONFLICT (session_id,lid) DO UPDATE SET phone=$3`, [sid, lid, phone]).catch(() => {}),
+  getLid: async (sid, lid) => { const r = await one(`SELECT phone FROM lidmap WHERE session_id=$1 AND lid=$2`, [sid, lid]); return r ? r.phone : null },
+
+  // ---- contacts / groups ----
+  upsertContact: (r) => q(`INSERT INTO contacts (session_id,jid,name,notify,is_business) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (session_id,jid) DO UPDATE SET name=COALESCE($3,contacts.name), notify=COALESCE($4,contacts.notify)`,
+    [r.session_id, r.jid, r.name, r.notify, r.is_business]),
+  listContacts: (sid, limit = 1000) => all(`SELECT * FROM contacts WHERE session_id=$1 ORDER BY name ASC LIMIT $2`, [sid, limit]),
+  upsertGroup: (r) => q(`INSERT INTO groups (session_id,jid,subject,description,owner,participants,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (session_id,jid) DO UPDATE SET subject=$3, description=$4, participants=$6`,
+    [r.session_id, r.jid, r.subject, r.description, r.owner, r.participants, r.created_at]),
+  listGroups: (sid) => all(`SELECT * FROM groups WHERE session_id=$1 ORDER BY subject ASC`, [sid]),
+
+  // ---- watchlist / keywords ----
+  addWatch: (sid, kind, value, label) => q(`INSERT INTO watchlist (session_id,kind,value,label,created_at) VALUES ($1,$2,$3,$4,$5)`, [sid, kind, value, label, Date.now()]),
+  delWatch: (id) => q(`DELETE FROM watchlist WHERE id=$1`, [id]),
+  listWatch: (sid) => sid ? all(`SELECT * FROM watchlist WHERE session_id=$1 OR session_id='*' ORDER BY created_at DESC`, [sid]) : all(`SELECT * FROM watchlist ORDER BY created_at DESC`),
+  getWatch: (id) => one(`SELECT * FROM watchlist WHERE id=$1`, [id]),
+  listWatchScoped: (ids) => (!ids || ids.length === 0) ? [] : all(`SELECT * FROM watchlist WHERE session_id = ANY($1) ORDER BY created_at DESC`, [ids]),
+  addKeyword: (w) => q(`INSERT INTO keywords (word,created_at) VALUES ($1,$2)`, [w, Date.now()]),
+  delKeyword: (id) => q(`DELETE FROM keywords WHERE id=$1`, [id]),
+  listKeywords: () => all(`SELECT * FROM keywords ORDER BY word ASC`),
+
+  // ---- events ----
+  logEvent: (sid, level, code, message) => q(`INSERT INTO events (session_id,level,code,message,ts) VALUES ($1,$2,$3,$4,$5)`, [sid, level, code || '', message, Date.now()]).catch(() => {}),
+  recentEvents: (n = 200) => all(`SELECT * FROM events ORDER BY id DESC LIMIT $1`, [n]),
+
+  // ---- analytics ----
+  stats: async (ids) => {
     if (ids && ids.length === 0) return { sessions: 0, sessionsOpen: 0, messages: 0, messages24h: 0, chats: 0, groups: 0, contacts: 0 }
-    const ph = ids ? `(${ids.map(() => '?').join(',')})` : null
-    const W = ph ? ` WHERE session_id IN ${ph}` : ''
-    const Wand = ph ? ` AND session_id IN ${ph}` : ''
-    const args = ids || []
-    const one = (sql, extra = []) => db.prepare(sql).get(...extra).n
+    const since = Date.now() - 24 * 3600 * 1000
+    const n = async (sql, p) => Number((await one(sql, p)).n)
+    const filt = ids ? ` WHERE session_id = ANY($1)` : ''
+    const a = ids ? [ids] : []
     return {
-      sessions: ids ? ids.length : one(`SELECT COUNT(*) n FROM sessions`),
-      sessionsOpen: db.prepare(`SELECT COUNT(*) n FROM sessions WHERE status='open'${ph ? ` AND id IN ${ph}` : ''}`).get(...args).n,
-      messages: one(`SELECT COUNT(*) n FROM messages${W}`, args),
-      messages24h: one(`SELECT COUNT(*) n FROM messages WHERE ts>=?${Wand}`, [since, ...args]),
-      chats: one(`SELECT COUNT(*) n FROM chats${W}`, args),
-      groups: one(`SELECT COUNT(*) n FROM groups${W}`, args),
-      contacts: one(`SELECT COUNT(*) n FROM contacts${W}`, args),
+      sessions: ids ? ids.length : await n(`SELECT COUNT(*) n FROM sessions`),
+      sessionsOpen: await n(`SELECT COUNT(*) n FROM sessions WHERE status='open'${ids ? ` AND id = ANY($1)` : ''}`, a),
+      messages: await n(`SELECT COUNT(*) n FROM messages${filt}`, a),
+      messages24h: await n(`SELECT COUNT(*) n FROM messages WHERE ts>=$${ids ? 2 : 1}${ids ? ` AND session_id = ANY($1)` : ''}`, ids ? [ids, since] : [since]),
+      chats: await n(`SELECT COUNT(*) n FROM chats${filt}`, a),
+      groups: await n(`SELECT COUNT(*) n FROM groups${filt}`, a),
+      contacts: await n(`SELECT COUNT(*) n FROM contacts${filt}`, a),
     }
   },
-
   hourly: (ids) => {
     if (ids && ids.length === 0) return []
-    const ph = ids ? ` AND session_id IN (${ids.map(() => '?').join(',')})` : ''
-    return db.prepare(`SELECT (ts/3600000) bucket, COUNT(*) n FROM messages
-      WHERE ts >= ?${ph} GROUP BY bucket ORDER BY bucket ASC`).all(Date.now() - 24 * 3600 * 1000, ...(ids || []))
+    const since = Date.now() - 24 * 3600 * 1000
+    return ids
+      ? all(`SELECT (ts/3600000) bucket, COUNT(*) n FROM messages WHERE ts>=$1 AND session_id = ANY($2) GROUP BY bucket ORDER BY bucket ASC`, [since, ids])
+      : all(`SELECT (ts/3600000) bucket, COUNT(*) n FROM messages WHERE ts>=$1 GROUP BY bucket ORDER BY bucket ASC`, [since])
   },
-
   topChats: (limit = 8, ids) => {
     if (ids && ids.length === 0) return []
-    const ph = ids ? ` AND session_id IN (${ids.map(() => '?').join(',')})` : ''
-    return db.prepare(`SELECT chat_name, COUNT(*) n FROM messages
-      WHERE chat_name IS NOT NULL${ph} GROUP BY chat_jid ORDER BY n DESC LIMIT ?`).all(...(ids || []), limit)
+    return ids
+      ? all(`SELECT chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL AND session_id = ANY($1) GROUP BY chat_jid, chat_name ORDER BY n DESC LIMIT $2`, [ids, limit])
+      : all(`SELECT chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL GROUP BY chat_jid, chat_name ORDER BY n DESC LIMIT $1`, [limit])
+  },
+  cleanupOld: async (days = 30) => {
+    const cutoff = Date.now() - days * 24 * 3600 * 1000
+    const r = await q(`DELETE FROM messages WHERE ts < $1`, [cutoff])
+    await q(`DELETE FROM chats WHERE last_ts < $1 AND jid NOT IN (SELECT DISTINCT chat_jid FROM messages WHERE messages.session_id = chats.session_id)`, [cutoff])
+    await q(`DELETE FROM events WHERE ts < $1`, [cutoff])
+    return r.rowCount || 0
   },
 
-  // ---- security: users ----
-  createUser: (username, pass_hash, salt, role = 'admin') =>
-    db.prepare(`INSERT INTO users (username,pass_hash,salt,role,created_at) VALUES (?,?,?,?,?)`)
-      .run(username, pass_hash, salt, role, Date.now()),
-  getUserByName: (u) => db.prepare(`SELECT * FROM users WHERE username=?`).get(u),
-  getUserById: (id) => db.prepare(`SELECT * FROM users WHERE id=?`).get(id),
-  // super_admin is intentionally hidden from user management
-  listUsers: () => db.prepare(`SELECT id,username,role,created_at,last_login FROM users WHERE role!='super_admin' ORDER BY id ASC`).all(),
-  deleteUser: (id) => { db.prepare(`DELETE FROM session_grants WHERE user_id=?`).run(id); db.prepare(`DELETE FROM users WHERE id=?`).run(id) },
-  countUsers: () => db.prepare(`SELECT COUNT(*) n FROM users`).get().n,
-  setLastLogin: (id) => db.prepare(`UPDATE users SET last_login=? WHERE id=?`).run(Date.now(), id),
-  setPassword: (id, pass_hash, salt) => db.prepare(`UPDATE users SET pass_hash=?, salt=? WHERE id=?`).run(pass_hash, salt, id),
+  // ---- users ----
+  createUser: (username, pass_hash, salt, role = 'admin') => q(`INSERT INTO users (username,pass_hash,salt,role,created_at) VALUES ($1,$2,$3,$4,$5)`, [username, pass_hash, salt, role, Date.now()]),
+  getUserByName: (u) => one(`SELECT * FROM users WHERE username=$1`, [u]),
+  getUserById: (id) => one(`SELECT * FROM users WHERE id=$1`, [id]),
+  listUsers: () => all(`SELECT id,username,role,created_at,last_login FROM users WHERE role!='super_admin' ORDER BY id ASC`),
+  deleteUser: async (id) => { await q(`DELETE FROM session_grants WHERE user_id=$1`, [id]); await q(`DELETE FROM users WHERE id=$1`, [id]) },
+  countUsers: async () => Number((await one(`SELECT COUNT(*) n FROM users`)).n),
+  setLastLogin: (id) => q(`UPDATE users SET last_login=$1 WHERE id=$2`, [Date.now(), id]),
+  setPassword: (id, pass_hash, salt) => q(`UPDATE users SET pass_hash=$1, salt=$2 WHERE id=$3`, [pass_hash, salt, id]),
 
-  // ---- security: auth sessions ----
-  createAuthSession: (r) => db.prepare(`
-    INSERT INTO auth_sessions (token,user_id,username,ip,ua,login_at,last_seen)
-    VALUES (@token,@user_id,@username,@ip,@ua,@login_at,@last_seen)`).run(r),
-  getAuthSession: (t) => db.prepare(`SELECT * FROM auth_sessions WHERE token=? AND logout_at IS NULL`).get(t),
-  touchAuthSession: (t) => db.prepare(`UPDATE auth_sessions SET last_seen=? WHERE token=?`).run(Date.now(), t),
-  closeAuthSession: (t) => db.prepare(`UPDATE auth_sessions SET logout_at=? WHERE token=?`).run(Date.now(), t),
-  listAuthSessions: (limit = 200) =>
-    db.prepare(`SELECT * FROM auth_sessions ORDER BY login_at DESC LIMIT ?`).all(limit),
-  activeAuthSessions: () =>
-    db.prepare(`SELECT * FROM auth_sessions WHERE logout_at IS NULL ORDER BY login_at DESC`).all(),
+  // ---- auth sessions ----
+  createAuthSession: (r) => q(`INSERT INTO auth_sessions (token,user_id,username,ip,ua,login_at,last_seen) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [r.token, r.user_id, r.username, r.ip, r.ua, r.login_at, r.last_seen]),
+  getAuthSession: (t) => one(`SELECT * FROM auth_sessions WHERE token=$1 AND logout_at IS NULL`, [t]),
+  touchAuthSession: (t) => q(`UPDATE auth_sessions SET last_seen=$1 WHERE token=$2`, [Date.now(), t]).catch(() => {}),
+  closeAuthSession: (t) => q(`UPDATE auth_sessions SET logout_at=$1 WHERE token=$2`, [Date.now(), t]),
+  listAuthSessions: (limit = 200) => all(`SELECT * FROM auth_sessions ORDER BY login_at DESC LIMIT $1`, [limit]),
+  activeAuthSessions: () => all(`SELECT * FROM auth_sessions WHERE logout_at IS NULL ORDER BY login_at DESC`),
 
-  // ---- security: audit ----
-  logAudit: (r) => db.prepare(`
-    INSERT INTO audit (user_id,username,action,target,detail,ip,ts)
-    VALUES (@user_id,@username,@action,@target,@detail,@ip,@ts)`).run(r),
-  listAudit: (limit = 500) => db.prepare(`SELECT * FROM audit ORDER BY id DESC LIMIT ?`).all(limit),
-  auditStats: () => {
-    const one = (sql, ...a) => db.prepare(sql).get(...a)
+  // ---- audit ----
+  logAudit: (r) => q(`INSERT INTO audit (user_id,username,action,target,detail,ip,ts) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [r.user_id, r.username, r.action, r.target, r.detail, r.ip, r.ts]).catch(() => {}),
+  listAudit: (limit = 500) => all(`SELECT * FROM audit ORDER BY id DESC LIMIT $1`, [limit]),
+  auditStats: async () => {
     const since = Date.now() - 24 * 3600 * 1000
+    const n = async (sql, p) => Number((await one(sql, p)).n)
     return {
-      logins24h: one(`SELECT COUNT(*) n FROM auth_sessions WHERE login_at>=?`, since).n,
-      active: one(`SELECT COUNT(*) n FROM auth_sessions WHERE logout_at IS NULL`).n,
-      actions24h: one(`SELECT COUNT(*) n FROM audit WHERE ts>=?`, since).n,
-      users: one(`SELECT COUNT(*) n FROM users`).n,
+      logins24h: await n(`SELECT COUNT(*) n FROM auth_sessions WHERE login_at>=$1`, [since]),
+      active: await n(`SELECT COUNT(*) n FROM auth_sessions WHERE logout_at IS NULL`),
+      actions24h: await n(`SELECT COUNT(*) n FROM audit WHERE ts>=$1`, [since]),
+      users: await n(`SELECT COUNT(*) n FROM users`),
     }
   },
+
+  // ---- key/value (license cache etc.) ----
+  kvGet: async (k) => { const r = await one(`SELECT v FROM kv WHERE k=$1`, [k]); return r ? r.v : null },
+  kvSet: (k, v) => q(`INSERT INTO kv (k,v) VALUES ($1,$2) ON CONFLICT (k) DO UPDATE SET v=$2`, [k, v]),
+  kvDel: (k) => q(`DELETE FROM kv WHERE k=$1`, [k]),
+
+  // ---- WhatsApp auth (Baileys) ----
+  waGet: async (sid, id) => { const r = await one(`SELECT value FROM wa_auth WHERE session_id=$1 AND id=$2`, [sid, id]); return r ? r.value : null },
+  waSet: (sid, id, value) => q(`INSERT INTO wa_auth (session_id,id,value) VALUES ($1,$2,$3) ON CONFLICT (session_id,id) DO UPDATE SET value=$3`, [sid, id, value]),
+  waDel: (sid, id) => q(`DELETE FROM wa_auth WHERE session_id=$1 AND id=$2`, [sid, id]),
+  waClear: (sid) => q(`DELETE FROM wa_auth WHERE session_id=$1`, [sid]),
+  waHasCreds: async (sid) => !!(await one(`SELECT 1 FROM wa_auth WHERE session_id=$1 AND id='creds'`, [sid])),
 }

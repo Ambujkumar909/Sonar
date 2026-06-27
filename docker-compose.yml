@@ -1,0 +1,40 @@
+# Sonar — full stack (Postgres + app) in one command:
+#   docker compose up --build
+# then open http://localhost:4545  (admin@sonar / Admin@123$)
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonar
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://sonar:sonar@db:5432/sonar
+      PORT: 4545
+      # change these for production:
+      SONAR_SUPERADMIN_USER: admin@sonar
+      SONAR_SUPERADMIN_PASS: Admin@123$
+      RETAIN_DAYS: 30
+      # licensing stays OFF until you set LICENSE_SERVER_URL
+    ports:
+      - "4545:4545"
+    volumes:
+      - ./logs:/app/logs   # permanent .txt archives on the host
+
+volumes:
+  pgdata:

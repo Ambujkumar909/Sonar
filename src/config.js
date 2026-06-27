@@ -10,11 +10,11 @@ module.exports = {
   ROOT,
   PORT: Number(process.env.PORT) || 4545,
 
-  // Storage (env-overridable so tests can run fully isolated)
+  // Storage — Postgres for ALL data (sessions, messages, users, WhatsApp auth…).
+  // Only the .txt archives remain on the filesystem.
+  DATABASE_URL: process.env.DATABASE_URL || 'postgres://sonar:sonar@localhost:5433/sonar',
   DATA_DIR: process.env.SONAR_DATA_DIR || path.join(ROOT, 'data'),
-  DB_FILE: path.join(process.env.SONAR_DATA_DIR || path.join(ROOT, 'data'), 'sonar.db'),
-  SESSIONS_DIR: process.env.SONAR_SESSIONS_DIR || path.join(ROOT, 'sessions'),
-  LOG_DIR: process.env.SONAR_LOG_DIR || path.join(ROOT, 'logs'), // preserves original .txt logging location
+  LOG_DIR: process.env.SONAR_LOG_DIR || path.join(ROOT, 'logs'), // .txt logs stay on disk
 
   // Locale / formatting (kept identical to the original logger)
   LOCALE: process.env.LOCALE || 'en-IN',
@@ -50,10 +50,11 @@ module.exports = {
 
   // Licensing — enforced only when LICENSE_SERVER_URL is set (empty = dev/off).
   LICENSE: {
-    serverUrl: process.env.LICENSE_SERVER_URL || '',
-    heartbeatMin: Number(process.env.LICENSE_HEARTBEAT_MIN) || 30,  // network re-validate cadence
-    graceHours: Number(process.env.LICENSE_GRACE_HOURS) || 72,      // max offline window before sessions stop
-    evalSec: Number(process.env.LICENSE_EVAL_SEC) || 30,            // local re-check cadence (catches expiry between heartbeats)
+    serverUrl: process.env.LICENSE_SERVER_URL || '',                // set → online (server) mode
+    offline: process.env.LICENSE_OFFLINE === '1' || process.env.LICENSE_MODE === 'offline', // pre-signed offline keys, no server
+    heartbeatMin: Number(process.env.LICENSE_HEARTBEAT_MIN) || 30,  // network re-validate cadence (server mode)
+    graceHours: Number(process.env.LICENSE_GRACE_HOURS) || 72,      // max offline window before sessions stop (server mode)
+    evalSec: Number(process.env.LICENSE_EVAL_SEC) || 30,            // local re-check cadence (expiry/rollback)
   },
 
   // Defaults for a brand-new session.

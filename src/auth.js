@@ -38,10 +38,10 @@ const canWrite = (r) => r !== 'viewer'
 // Fixed, well-known super_admin seed (can be overridden via env).
 const SEED_USER = process.env.SONAR_SUPERADMIN_USER || 'admin@sonar'
 const SEED_PASS = process.env.SONAR_SUPERADMIN_PASS || 'Admin@123$'
-function ensureBootstrapAdmin() {
-  if (store.countUsers() > 0) return
+async function ensureBootstrapAdmin() {
+  if (await store.countUsers() > 0) return
   const { hash, salt } = hashPassword(SEED_PASS)
-  store.createUser(SEED_USER, hash, salt, 'super_admin')
+  await store.createUser(SEED_USER, hash, salt, 'super_admin')
   console.log('\n  ╭──────────────────────────────────────────────╮')
   console.log('  │  Sonar SUPER ADMIN seeded                    │')
   console.log(`  │  user: ${SEED_USER.padEnd(38)}│`)
@@ -75,23 +75,25 @@ function ipOf(req) {
   if (ip === '::1') ip = '127.0.0.1'             // IPv6 localhost → readable
   return ip
 }
-function currentUser(req) {
+async function currentUser(req) {
   const token = getCookie(req, TOKEN_COOKIE)
   if (!token) return null
-  const sess = store.getAuthSession(token)
+  const sess = await store.getAuthSession(token)
   if (!sess) return null
-  store.touchAuthSession(token)
+  store.touchAuthSession(token) // fire-and-forget
   return { id: sess.user_id, username: sess.username, token, login_at: sess.login_at }
 }
 
-// ---- middleware ------------------------------------------------------------
-function requireAuth(req, res, next) {
-  const u = currentUser(req)
-  if (!u) return res.status(401).json({ ok: false, error: 'auth required' })
-  const full = store.getUserById(u.id)
-  if (!full) return res.status(401).json({ ok: false, error: 'auth required' })
-  req.user = { ...u, role: full.role }      // attach role for RBAC/RLS
-  next()
+// ---- middleware (async — Postgres) -----------------------------------------
+async function requireAuth(req, res, next) {
+  try {
+    const u = await currentUser(req)
+    if (!u) return res.status(401).json({ ok: false, error: 'auth required' })
+    const full = await store.getUserById(u.id)
+    if (!full) return res.status(401).json({ ok: false, error: 'auth required' })
+    req.user = { ...u, role: full.role }      // attach role for RBAC/RLS
+    next()
+  } catch (e) { next(e) }
 }
 // user & grant management — admin or super_admin
 function requireUserAdmin(req, res, next) {
@@ -112,16 +114,18 @@ function requireWrite(req, res, next) {
   next()
 }
 // RLS: a non-admin may only touch sessions they own; unknown id → 404.
-function requireSessionAccess(req, res, next) {
-  const id = req.params.id
-  if (!store.getSession(id)) return res.status(404).json({ ok: false, error: 'no such session' })
-  if (!store.canAccessSession(req.user, id)) return res.status(403).json({ ok: false, error: 'no access to this session' })
-  next()
+async function requireSessionAccess(req, res, next) {
+  try {
+    const id = req.params.id
+    if (!(await store.getSession(id))) return res.status(404).json({ ok: false, error: 'no such session' })
+    if (!(await store.canAccessSession(req.user, id))) return res.status(403).json({ ok: false, error: 'no access to this session' })
+    next()
+  } catch (e) { next(e) }
 }
 
-// ---- audit -----------------------------------------------------------------
+// ---- audit (fire-and-forget; uses req.user set by requireAuth) --------------
 function audit(req, action, target = '', detail = '') {
-  const u = req.user || currentUser(req) || {}
+  const u = req.user || {}
   store.logAudit({
     user_id: u.id || null, username: u.username || 'anonymous',
     action, target, detail, ip: ipOf(req), ts: Date.now(),

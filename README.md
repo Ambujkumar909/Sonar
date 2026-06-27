@@ -9,7 +9,8 @@
 Multi-session monitoring on [Baileys](https://github.com/WhiskeySockets/Baileys) with a beautiful dashboard, self-healing connections, role-based access, a full audit trail, and cryptographic machine-bound licensing.
 
 ![Node](https://img.shields.io/badge/Node-22-3c873a)
-![Stack](https://img.shields.io/badge/stack-Express%20%2B%20Socket.IO%20%2B%20SQLite-be8429)
+![Stack](https://img.shields.io/badge/stack-Express%20%2B%20Socket.IO%20%2B%20PostgreSQL-be8429)
+![Docker](https://img.shields.io/badge/docker-compose-2496ed)
 ![Mode](https://img.shields.io/badge/mode-READ--ONLY-1c8f52)
 ![Tests](https://img.shields.io/badge/tests-136%20passing-1c8f52)
 ![License](https://img.shields.io/badge/license-ISC-blue)
@@ -40,7 +41,7 @@ It's built for teams that must **never miss a lead**: link one or more WhatsApp 
 | 🎯 **Targeted capture** | Watch specific **groups** and **phone numbers** — nothing else is stored |
 | ♻️ **Self-healing** | Reconnects through *every* disconnect code; recovery always **< 3 minutes** |
 | 💬 **Elite chat reader** | Recent chats sidebar, group/direct filter, date separators, per-sender colours |
-| 🗂️ **Permanent archive** | Per-chat `.txt` logs (kept forever) + 30-day SQLite hot store |
+| 🗂️ **Permanent archive** | Per-chat `.txt` logs (kept forever) + 30-day Postgres hot store |
 | 🔐 **4-tier RBAC + RLS** | super_admin / admin / manager / viewer, with per-session access grants |
 | 🛡️ **Full audit trail** | Who logged in, from where, how long, and every action |
 | 🔑 **Licensing** | Ed25519-signed, machine-bound, time-limited; optional bytecode hardening |
@@ -67,11 +68,17 @@ It's built for teams that must **never miss a lead**: link one or more WhatsApp 
 
 ## 🚀 Quick start
 
+### Option A — Docker (everything in one command)
 ```bash
-git clone https://github.com/Ambujkumar909/Sonar.git
-cd Sonar
+git clone <repo-url> sonar && cd sonar
+docker compose up --build
+```
+This builds the app and runs **Postgres + Sonar** together. That's it.
+
+### Option B — local (Node 22 + a Postgres you provide)
+```bash
 npm install
-npm start
+DATABASE_URL="postgres://user:pass@host:5432/sonar" npm start
 ```
 
 Open **http://localhost:4545** and sign in:
@@ -97,7 +104,7 @@ Open **http://localhost:4545** and sign in:
 flowchart LR
   WA[WhatsApp] -- read-only --> B[Baileys sockets]
   B --> SM[Session Manager<br/>watchdog · supervisor · license gate]
-  SM --> DB[(SQLite<br/>30-day hot store)]
+  SM --> DB[(PostgreSQL<br/>sessions · messages · WhatsApp auth · users · audit)]
   SM --> TXT[/.txt archive<br/>permanent/]
   SM <--> IO[Socket.IO]
   API[Express REST API<br/>RBAC · RLS · audit] --> DB
@@ -110,7 +117,8 @@ flowchart LR
 ```
 src/
   config.js          configuration (env-overridable)
-  store.js           SQLite persistence + RLS-scoped queries + retention
+  store.js           PostgreSQL persistence + RLS-scoped queries + retention
+  waauth.js          Baileys auth state stored in Postgres (no key files)
   textlog.js         per-chat .txt logging (original format preserved)
   reconnect.js       disconnect-code policy + capped backoff
   sessionManager.js  multi-session Baileys engine · watchdog · supervisor · license hold
@@ -205,7 +213,7 @@ node tests/security.test.js    #  30 assertions — IDOR, authz, caps, validatio
 
 ## 🧰 Tech stack
 
-**Backend:** Node 22 · Express 5 · Socket.IO · better-sqlite3 · @whiskeysockets/baileys · helmet · express-rate-limit
+**Backend:** Node 22 · Express 5 · Socket.IO · PostgreSQL (pg) · @whiskeysockets/baileys · helmet · express-rate-limit
 **Frontend:** vanilla JS SPA · Socket.IO client · Fraunces + Plus Jakarta Sans
 **Crypto:** Ed25519 (licensing) · scrypt (auth) · AES-256-GCM (license cache)
 
