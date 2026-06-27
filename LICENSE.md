@@ -1,95 +1,56 @@
-# Sonar Licensing
+# Sonar Licensing (offline, key-based)
 
-A hardened, machine-bound, time-limited licensing system. The **license server**
-(you host it) issues Ed25519-signed licenses; each **Sonar deployment** validates
-against it and stops all WhatsApp sessions when the plan expires or is revoked.
+Sonar uses **offline, pre-signed license keys** — there is **no license server**.
+Each key is an Ed25519-signed token with a baked-in expiry (e.g. 1 year). Sonar
+verifies it locally with an embedded public key and enforces the expiry. Put a key
+in `.env` and it validates on boot.
 
-## Components
+## How it works
 
-- `license-server/` — standalone app you host (own `package.json`, own DB, the **private** signing key)
-- `src/license.js` — the client embedded in Sonar (holds the **public** key)
+- The **private signing key** (`keys/private.pem`) is yours and never ships. The
+  matching **public key** is embedded in `src/license.js`.
+- You generate a batch of keys once, hold them, and apply one at a time.
+- A key is a self-contained signed token: `base64url(payload).base64url(signature)`
+  where the payload includes `expiresAt`. The signature covers the whole payload, so
+  the expiry **cannot be edited** without invalidating the key.
 
-The keypair lives in `license-server/keys/`. **Never share `private.pem`.** The public
-key is embedded in `src/license.js`. If you regenerate keys, update both.
-
-## 1. Run the license server (on your host/VPS)
-
-```bash
-cd license-server
-npm install
-LICENSE_ADMIN_KEY="a-long-random-secret" LICENSE_PORT=5005 npm start
-```
-Open `http://<host>:5005`, enter the admin key, and create license keys
-(customer + plan length in days). You can **extend**, **revoke**, and **migrate**
-(release the machine binding) any license from there.
-
-> Put it behind HTTPS in production (e.g. a reverse proxy). The signing still works
-> over plain HTTP, but HTTPS protects the admin key in transit.
-
-## 2. Point Sonar at it
-
-Start Sonar with the licensing env vars:
-```bash
-LICENSE_SERVER_URL="https://licenses.yourdomain.com" npm start
-```
-Optional:
-- `LICENSE_HEARTBEAT_MIN` — re-validation cadence (default 30 min)
-- `LICENSE_GRACE_HOURS` — max offline window before sessions stop (default 72)
-
-If `LICENSE_SERVER_URL` is **not** set, licensing is **disabled** (dev mode) and
-everything runs unrestricted.
-
-## 3. Activate
-
-Log in to Sonar as **super_admin** → **License** page → paste the key → Activate.
-The license binds to this machine. **Admins and super_admins** see a live countdown
-(days/hours/min/sec remaining); only **super_admin** can activate/change the key.
-
-## What happens on expiry / revoke
-
-All WhatsApp sessions stop immediately; the dashboard stays browsable with a banner.
-When the plan is renewed (extend on the server) the next heartbeat auto-resumes sessions.
-
-## Migrating to a new server
-
-In the license server admin UI, click **Migrate** on the license (releases the machine
-binding), then **Activate** the same key on the new Sonar machine.
-
-## Security model (and its one honest limit)
-
-Enforced: Ed25519-signed tokens (expiry/fingerprint unforgeable), machine binding,
-server-authoritative time + clock-rollback/anti-replay protection, mandatory heartbeat
-with a finite offline grace, tamper-evident AES-GCM local state, and **server-side**
-enforcement (not the browser).
-
-The one limit: Sonar runs on the customer's machine, so a determined attacker with the
-source could patch out the check. To raise that bar to "practically uncrackable", the
-enforcement-critical modules (`src/license.js` and `src/sessionManager.js`, which decide
-and apply the session-hold) can be compiled to **V8 bytecode** so they can't be read or
-edited in plain text.
-
-### Secure (bytecode) production build
+## Generate keys
 
 ```bash
-npm run build:secure        # compiles src/license.js + src/sessionManager.js → .jsc
+node scripts/make-keys.js 15 365     # 15 keys, 1 year each → license-keys.txt
 ```
-Then for the production deploy, ship the `.jsc` files and **delete the matching `.js`
-sources** (keep them in your own private source control). `require()` prefers `.js` in
-dev and transparently falls back to `.jsc` when the `.js` is absent — `src/server.js`
-already registers the `bytenode` loader at startup, so no code changes are needed.
+`license-keys.txt` is gitignored — keep it private. Each key is independent.
 
+## Apply a key
+
+In `.env`:
+```
+LICENSE_KEY=eyJ...the key from license-keys.txt...
+```
+Start (or restart) Sonar. It validates on boot:
+- valid & not expired → **active**, sessions run
+- expired / forged / garbage → sessions are **held** (stopped) until a valid key is set
+- empty `LICENSE_KEY` → **disabled** (runs unrestricted)
+
+When a key expires, replace `LICENSE_KEY` with the next one and restart.
+
+## Security properties (verified)
+
+- **Unforgeable** — bumping `expiresAt` and keeping the old signature is rejected
+  (signature binds the full payload). Garbage/random keys rejected.
+- **Expiry enforced continuously** — a local re-check (every `LICENSE_EVAL_SEC`)
+  flips `active → expired` the moment the date passes and **auto-holds all sessions**.
+- **Clock-rollback resistant** — the highest time ever seen is persisted (Postgres,
+  AES-256-GCM, machine-bound); setting the system clock back does not extend a license.
+- **Server-side enforcement** — the hold lives in the Node backend, not the browser.
+
+## Maximum anti-tamper (optional)
+
+Since Sonar runs on the customer's machine, a determined attacker with the source
+could patch out the check. To make that impractical, compile the enforcement modules
+to V8 bytecode:
 ```bash
-# on the deploy box, after build:
-rm src/license.js src/sessionManager.js     # keep src/license.jsc + src/sessionManager.jsc
-npm start
+npm run build:secure          # → src/license.jsc + src/sessionManager.jsc
+# then deploy the .jsc and delete the matching .js
 ```
-
-Notes:
-- `.jsc` is tied to the Node **major** version it was built with — build on the same
-  Node version you deploy with (this project is verified on Node 22).
-- This was tested: with the `.js` removed, Sonar boots and enforces licensing entirely
-  from bytecode.
-- The embedded `APP_SECRET` (local-state encryption) and the whole license/enforcement
-  flow become bytecode, defeating casual and most determined source-patching. Combined
-  with signed tokens + machine binding + heartbeat + server-side enforcement, this is the
-  strongest practical protection for software that runs on the customer's own server.
+`src/server.js` already loads the `.jsc` automatically.

@@ -15,7 +15,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 
-const PRIV_PATH = process.env.PRIVATE_KEY_FILE || path.join(__dirname, '..', 'license-server', 'keys', 'private.pem')
+const PRIV_PATH = process.env.PRIVATE_KEY_FILE || path.join(__dirname, '..', 'keys', 'private.pem')
 if (!fs.existsSync(PRIV_PATH)) { console.error('private key not found at', PRIV_PATH); process.exit(1) }
 const PRIV = crypto.createPrivateKey(fs.readFileSync(PRIV_PATH))
 

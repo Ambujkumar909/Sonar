@@ -50,12 +50,12 @@ module.exports = {
   },
 
   // Licensing — enforced only when LICENSE_SERVER_URL is set (empty = dev/off).
+  // Offline, key-based licensing (no server). Put a key in LICENSE_KEY to enforce;
+  // leave empty to run unrestricted (disabled).
   LICENSE: {
-    serverUrl: process.env.LICENSE_SERVER_URL || '',                // set → online (server) mode
-    offline: process.env.LICENSE_OFFLINE === '1' || process.env.LICENSE_MODE === 'offline', // pre-signed offline keys, no server
-    heartbeatMin: Number(process.env.LICENSE_HEARTBEAT_MIN) || 30,  // network re-validate cadence (server mode)
-    graceHours: Number(process.env.LICENSE_GRACE_HOURS) || 72,      // max offline window before sessions stop (server mode)
-    evalSec: Number(process.env.LICENSE_EVAL_SEC) || 30,            // local re-check cadence (expiry/rollback)
+    key: (process.env.LICENSE_KEY || '').trim(),
+    offline: process.env.LICENSE_OFFLINE === '1' || !!(process.env.LICENSE_KEY || '').trim(),
+    evalSec: Number(process.env.LICENSE_EVAL_SEC) || 30, // local re-check cadence (expiry/rollback)
   },
 
   // Defaults for a brand-new session.

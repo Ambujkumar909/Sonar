@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "legacy": "node automate.js",
     "build:secure": "node scripts/build-secure.js",
-    "test:license": "node tests/licensing.test.js",
+    "make-keys": "node scripts/make-keys.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

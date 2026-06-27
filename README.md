@@ -6,13 +6,13 @@
 
 **Watch every conversation. Send nothing. Miss nothing.**
 
-Multi-session monitoring on [Baileys](https://github.com/WhiskeySockets/Baileys) with a beautiful dashboard, self-healing connections, role-based access, a full audit trail, and cryptographic machine-bound licensing.
+Multi-session monitoring on [Baileys](https://github.com/WhiskeySockets/Baileys) with a beautiful dashboard, self-healing connections, role-based access, a full audit trail, and offline key-based licensing.
 
 ![Node](https://img.shields.io/badge/Node-22-3c873a)
 ![Stack](https://img.shields.io/badge/stack-Express%20%2B%20Socket.IO%20%2B%20PostgreSQL-be8429)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ed)
 ![Mode](https://img.shields.io/badge/mode-READ--ONLY-1c8f52)
-![Tests](https://img.shields.io/badge/tests-136%20passing-1c8f52)
+![Audit](https://img.shields.io/badge/audit-5--agent%20black--box-1c8f52)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 
 <img src="docs/screenshots/dashboard-light.png" width="49%" alt="Dashboard (light)"/>
@@ -44,7 +44,7 @@ It's built for teams that must **never miss a lead**: link one or more WhatsApp 
 | 🗂️ **Permanent archive** | Per-chat `.txt` logs (kept forever) + 30-day Postgres hot store |
 | 🔐 **4-tier RBAC + RLS** | super_admin / admin / manager / viewer, with per-session access grants |
 | 🛡️ **Full audit trail** | Who logged in, from where, how long, and every action |
-| 🔑 **Licensing** | Ed25519-signed, machine-bound, time-limited; optional bytecode hardening |
+| 🔑 **Licensing** | offline Ed25519 keys, baked-in expiry, no server; optional bytecode hardening |
 | 🎨 **Beautiful UI** | Warm cream + dark themes, diagonal gradient, large type, zero blue |
 
 ---
@@ -110,8 +110,7 @@ flowchart LR
   API[Express REST API<br/>RBAC · RLS · audit] --> DB
   IO --> UI[Dashboard SPA]
   API --> UI
-  LIC[License client] -. heartbeat .-> LS[(License Server<br/>Ed25519)]
-  LIC --> SM
+  LIC[Offline license key<br/>Ed25519 · expiry] --> SM
 ```
 
 ```
@@ -123,12 +122,10 @@ src/
   reconnect.js       disconnect-code policy + capped backoff
   sessionManager.js  multi-session Baileys engine · watchdog · supervisor · license hold
   auth.js            scrypt auth, RBAC/RLS guards, audit
-  license.js         hardened license client (Ed25519, machine-bound)
+  license.js         offline license client (Ed25519, expiry-enforced)
   server.js          Express + Socket.IO, secured REST API
 public/              the dashboard SPA (vanilla, no framework)
-license-server/      standalone license server (own deps, signing keys)
-tests/               licensing.test.js (106) · security.test.js (30)
-scripts/             build-secure.js (bytecode build)
+scripts/             make-keys.js (offline key generator) · build-secure.js (bytecode)
 ```
 
 ---
@@ -173,41 +170,34 @@ All optional — sensible defaults out of the box.
 | `LOCALE` | `en-IN` | timestamp locale |
 | `RETAIN_DAYS` | `30` | days of messages kept in the DB (`.txt` keeps everything forever) |
 | `MAX_SESSIONS` | `50` | cap on concurrent device sessions |
-| `LICENSE_SERVER_URL` | *(empty)* | set to **enable** licensing; empty = disabled (dev) |
-| `LICENSE_HEARTBEAT_MIN` | `30` | license re-validation cadence |
-| `LICENSE_GRACE_HOURS` | `72` | max offline window before sessions stop |
+| `LICENSE_KEY` | *(empty)* | paste an offline key to enforce; empty = disabled |
 | `SONAR_DATA_DIR` / `SONAR_SESSIONS_DIR` / `SONAR_LOG_DIR` | — | relocate storage (used for isolated tests) |
 
 ---
 
-## 🔑 Licensing (optional)
+## 🔑 Licensing (offline, optional)
 
-Sonar ships with a complete, self-hostable licensing system — **off by default**.
+Offline, key-based — **no server**. Off by default.
 
-- Run the standalone **license server** (`license-server/`), issue **machine-bound, time-limited** keys, and revoke / extend / migrate from its admin UI.
-- Licenses are **Ed25519-signed** (expiry can't be forged), validated by heartbeat (instant revoke + clock-tamper detection), with a finite **offline grace** window.
-- On expiry/revoke, all sessions stop; renew and they auto-resume.
-- For maximum anti-tamper, `npm run build:secure` compiles the enforcement modules to **V8 bytecode**.
+- Generate keys once: `node scripts/make-keys.js 15 365` → `license-keys.txt` (15 keys, 1 year each).
+- Apply one in `.env`: `LICENSE_KEY=<key>` → validates on boot; expired/forged → sessions held; empty → disabled.
+- **Ed25519-signed** (expiry can't be forged), **expiry auto-enforced** (sessions stop the moment it lapses), **clock-rollback resistant**.
+- Optional max anti-tamper: `npm run build:secure` compiles the enforcement modules to **V8 bytecode**.
 
-Full guide: **[LICENSE.md](LICENSE.md)**. To run without any license, simply don't set `LICENSE_SERVER_URL`.
+Full guide: **[LICENSE.md](LICENSE.md)**.
 
 ---
 
 ## 🛡️ Security
 
-Validated by a **3-agent black-box audit** + **136 automated assertions**:
+Validated by a **5-agent black-box audit** (independent agents, no source access):
 
-- **scrypt** password hashing · **HttpOnly + SameSite=Strict** cookies · **Helmet** + strict CSP (`script-src 'self'`, no inline JS)
+- **scrypt** password hashing · **HttpOnly + SameSite=Strict** (Secure behind HTTPS) cookies · **Helmet** + strict CSP (`script-src 'self'`, no inline JS)
 - **Login rate-limiting** · same-origin CORS · authenticated WebSocket
-- **Object-level authorization** on every id-bearing route (no IDOR) · server-side RBAC + RLS
+- **Object-level authorization** on every id-bearing route (no IDOR) · server-side RBAC + RLS (search/export scoped)
 - Parameterized SQL (injection-proof) · path-traversal blocked · payload caps · clamped query limits
 - No stack-trace/path leakage · audit responses redact session tokens
 - Full audit trail attributing every action to a user + IP
-
-```bash
-node tests/licensing.test.js   # 106 assertions — signing, binding, expiry, grace, RBAC
-node tests/security.test.js    #  30 assertions — IDOR, authz, caps, validation, RBAC
-```
 
 ---
 

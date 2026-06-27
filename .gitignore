@@ -31,3 +31,6 @@ Thumbs.db
 
 # generated offline license keys — keep private
 license-keys.txt
+
+# offline license signing keys — keep PRIVATE
+keys/
