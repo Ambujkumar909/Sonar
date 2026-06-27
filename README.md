@@ -125,7 +125,7 @@ src/
   license.js         offline license client (Ed25519, expiry-enforced)
   server.js          Express + Socket.IO, secured REST API
 public/              the dashboard SPA (vanilla, no framework)
-scripts/             make-keys.js (offline key generator) · build-secure.js (bytecode)
+scripts/             build-secure.js (bytecode build)
 ```
 
 ---
@@ -179,7 +179,7 @@ All optional — sensible defaults out of the box.
 
 Offline, key-based — **no server**. Off by default.
 
-- Generate keys once: `node scripts/make-keys.js 15 365` → `license-keys.txt` (15 keys, 1 year each).
+- Generate keys once (issuer-only, private): `node keys/make-keys.js 15 365` → `license-keys.txt`.
 - Apply one in `.env`: `LICENSE_KEY=<key>` → validates on boot; expired/forged → sessions held; empty → disabled.
 - **Ed25519-signed** (expiry can't be forged), **expiry auto-enforced** (sessions stop the moment it lapses), **clock-rollback resistant**.
 - Optional max anti-tamper: `npm run build:secure` compiles the enforcement modules to **V8 bytecode**.

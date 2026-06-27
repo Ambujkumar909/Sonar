@@ -14,3 +14,6 @@ ADMIN_CREDENTIALS.txt
 npm-debug.log
 .env
 .env.*
+
+keys/
+scripts/make-keys.js

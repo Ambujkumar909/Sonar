@@ -14,10 +14,14 @@ in `.env` and it validates on boot.
   where the payload includes `expiresAt`. The signature covers the whole payload, so
   the expiry **cannot be edited** without invalidating the key.
 
-## Generate keys
+## Generate keys (private — issuer only)
+
+The generator and the **private signing key live ONLY with you** in `keys/`
+(gitignored, never committed, never shipped in the Docker image). No deployment
+or repo clone can mint keys — they only carry the public key to *verify*.
 
 ```bash
-node scripts/make-keys.js 15 365     # 15 keys, 1 year each → license-keys.txt
+node keys/make-keys.js 15 365     # 15 keys, 1 year each → license-keys.txt
 ```
 `license-keys.txt` is gitignored — keep it private. Each key is independent.
 
