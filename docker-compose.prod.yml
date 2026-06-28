@@ -1,0 +1,23 @@
+# Sonar — PRODUCTION overlay (honocode server)
+# Uses the shared `postgres_common` database and the `shared_proxy` network,
+# sitting behind the shared `nginx_proxy`. No bundled DB, no host ports.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+services:
+  app:
+    build: .
+    image: sonar:latest
+    container_name: sonar
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "4545"                       # reachable only on shared_proxy, via nginx_proxy
+    volumes:
+      - /data/Sonar_Whsup/logs:/app/logs   # .txt archives stay under /data
+    networks:
+      - shared_proxy
+
+networks:
+  shared_proxy:
+    external: true
