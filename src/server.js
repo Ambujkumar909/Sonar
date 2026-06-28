@@ -212,6 +212,14 @@ app.delete('/api/watch/:id', auth.requireWrite, wrap(async (req, res) => {
   await store.delWatch(Number(req.params.id)); auth.audit(req, 'watch.del', req.params.id); ok(res, {})
 }))
 
+// ---- pending new-group alerts (admin only) --------------------------------
+app.get('/api/pending-groups', auth.requireUserAdmin, wrap(async (req, res) => ok(res, { groups: await store.listPendingGroups() })))
+app.delete('/api/pending-groups', auth.requireUserAdmin, wrap(async (req, res) => {
+  const { sid, jid } = req.query
+  if (!sid || !jid) return bad(res, 'sid and jid required')
+  await store.delPendingGroup(sid, jid); auth.audit(req, 'group.pending.dismiss', `${sid}:${jid}`); ok(res, {})
+}))
+
 app.get('/api/keywords', wrap(async (req, res) => ok(res, { keywords: await store.listKeywords() })))
 app.post('/api/keywords', auth.requireWrite, wrap(async (req, res) => {
   const word = (typeof req.body?.word === 'string' ? req.body.word : '').trim().slice(0, 100)

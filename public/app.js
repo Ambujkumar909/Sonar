@@ -10,8 +10,15 @@ const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Typ
 const del = (path) => api(path, { method: 'DELETE' })
 
 const state = { sessions: [], stats: {}, view: 'dashboard', chatSession: null, chatJid: null, feed: [], newGroups: [] }
-try { state.newGroups = JSON.parse(localStorage.getItem('sonar.newGroups') || '[]') } catch { state.newGroups = [] }
-const saveNewGroups = () => { try { localStorage.setItem('sonar.newGroups', JSON.stringify(state.newGroups)) } catch {} }
+// Pending new-group alerts are persisted server-side (admin-visible across machines),
+// so any admin sees a group joined while their dashboard was closed.
+async function loadPendingGroups() {
+  if (!isAdminish()) { state.newGroups = []; return }
+  try {
+    const r = await api('/pending-groups')
+    if (r && r.ok) state.newGroups = r.groups.map(g => ({ sessionId: g.session_id, jid: g.jid, subject: g.subject, participants: g.participants, ts: g.ts }))
+  } catch {}
+}
 const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
 const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
 const initials = (s) => (s || '?').replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '#'
@@ -86,11 +93,12 @@ function initSocket() {
   socket.on('alert', (a) => toast(`⚑ <b>${esc(a.keyword)}</b> in ${esc(a.chatName)}<br><span style="font-weight:500;color:var(--ink-soft)">${esc(a.text.slice(0, 90))}</span>`, 'alert'))
   socket.on('license', () => { refreshLicenseBanner(); if (state.view === 'license') render('license') })
   socket.on('newgroup', (g) => {
+    if (!isAdminish()) return // pending-group alerts are an admin concern
     if (state.newGroups.some(x => x.jid === g.jid && x.sessionId === g.sessionId)) return
-    state.newGroups.unshift(g); saveNewGroups()
+    state.newGroups.unshift(g)
     const sname = (state.sessions.find(s => s.id === g.sessionId) || {}).name || 'a session'
     toast(`👥 New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to add it to your watchlist.</span>`, 'alert')
-    renderNewGroupBanner()
+    renderNewGroupBanner(); updateNewGroupBadge()
   })
 }
 
@@ -169,7 +177,14 @@ async function renderDashboard() {
     <div class="topchat"><span class="tc-name">${esc(c.chat_name || '—')}</span><span class="tc-n">${c.n} msgs</span></div>
   `).join('') : '<div class="empty">No messages yet.</div>'
   renderFeed()
-  renderNewGroupBanner()
+  await loadPendingGroups()
+  renderNewGroupBanner(); updateNewGroupBadge()
+}
+function updateNewGroupBadge() {
+  const b = $('#navNewGroups'); if (!b) return
+  const n = state.newGroups.length
+  b.textContent = n
+  b.classList.toggle('hide', n === 0)
 }
 function renderNewGroupBanner() {
   const el = $('#newGroupBanner'); if (!el) return
@@ -354,20 +369,62 @@ async function loadMessages() {
 }
 
 /* ---------- WATCHLIST ---------- */
+const normGroup = (s) => (s || '').trim().toLowerCase()
+// Looser key (drops case, spacing AND punctuation) — used only to self-heal a
+// hand-typed entry against the authoritative name picked from the dropdown.
+const looseGroup = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+function drawWatchTable(watch, nameById, sizeMap) {
+  const members = (w) => {
+    if (w.kind !== 'group') return '—'
+    const live = sizeMap[w.session_id] && sizeMap[w.session_id][normGroup(w.value)]
+    if (live != null) return live                 // freshest: live group size
+    return (w.members != null ? w.members : '—')  // stored fallback
+  }
+  $('#watchTable').innerHTML = `<thead><tr><th>Session</th><th>Type</th><th>Value</th><th>Members</th><th></th></tr></thead><tbody>${
+    watch.length ? watch.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td>${members(w)}</td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
+    : '<tr><td colspan="5"><div class="empty">Watchlist empty — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
+}
 async function renderWatchlist() {
   fillSessionSelect($('#watchSession'))
   const { watch } = await api('/watch')
   const nameById = Object.fromEntries(state.sessions.map(s => [s.id, s.name]))
-  $('#watchTable').innerHTML = `<thead><tr><th>Session</th><th>Type</th><th>Value</th><th></th></tr></thead><tbody>${
-    watch.length ? watch.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
-    : '<tr><td colspan="4"><div class="empty">Watchlist empty — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
+  drawWatchTable(watch, nameById, {}) // render now with stored counts
+  // Then enrich (best-effort) with live group sizes — also refreshes the stored
+  // `groups` table server-side, so the count appears even if it was never synced.
+  const sids = [...new Set(watch.filter(w => w.kind === 'group' && w.session_id && w.session_id !== '*').map(w => w.session_id))]
+  if (!sids.length) return
+  const sizeMap = {}
+  await Promise.all(sids.map(async sid => {
+    try {
+      const r = await api(`/sessions/${sid}/groups/live`)
+      if (r && r.ok) { const m = {}; r.groups.forEach(g => { m[normGroup(g.subject)] = g.participants }); sizeMap[sid] = m }
+    } catch {}
+  }))
+  if (state.view === 'watchlist' && Object.keys(sizeMap).length) drawWatchTable(watch, nameById, sizeMap)
 }
 window.delWatch = async (id) => { await del('/watch/' + id); toast('Removed'); renderWatchlist() }
 $('#addWatchBtn').onclick = async () => {
   const sid = $('#watchSession').value, kind = $('#watchKind').value, value = $('#watchValue').value.trim()
   if (!sid || !value) return toast('Enter a value')
-  await post('/watch', { sid, kind, value }); $('#watchValue').value = ''; toast('Added to watchlist'); renderWatchlist()
+  if (kind === 'group') {
+    const wr = await api('/watch?sid=' + encodeURIComponent(sid))
+    const existing = (wr.ok ? wr.watch : []).filter(w => w.kind === 'group' && w.session_id === sid)
+    // Only self-heal when the value is the authoritative one picked from the dropdown.
+    if (state.watchPicked === value) {
+      const dupes = existing.filter(w => w.value !== value && looseGroup(w.value) === looseGroup(value))
+      for (const d of dupes) { try { await del('/watch/' + d.id) } catch {} }
+      if (dupes.length) toast(`Corrected ${dupes.length} typed entr${dupes.length > 1 ? 'ies' : 'y'} to the exact group name`)
+    }
+    if (existing.some(w => w.value === value)) {
+      state.watchPicked = null; $('#watchValue').value = ''; renderWatchlist()
+      return toast('Already on the watchlist')
+    }
+  }
+  const r = await post('/watch', { sid, kind, value })
+  if (r && r.ok === false) return toast(r.error || 'Could not add', 'err')
+  state.watchPicked = null; $('#watchValue').value = ''; toast('Added to watchlist'); renderWatchlist()
 }
+$('#watchValue').oninput = () => { state.watchPicked = null } // manual edit drops the authoritative pick
 $('#fetchGroupsBtn').onclick = async () => {
   const sid = $('#watchSession').value
   if (!sid) return toast('Pick a session first')
@@ -377,14 +434,25 @@ $('#fetchGroupsBtn').onclick = async () => {
     const r = await api(`/sessions/${sid}/groups/live`)
     if (!r.ok) return toast(r.error || 'Could not fetch groups', 'err')
     if (!r.groups.length) { sel.innerHTML = '<option value="">No groups found</option>'; return toast('No groups on this session') }
+    // Mark which groups are already on the watchlist so unmonitored ones stand out.
+    const wr = await api('/watch?sid=' + encodeURIComponent(sid))
+    const watched = new Set((wr.ok ? wr.watch : []).filter(w => w.kind === 'group').map(w => w.value))
+    let pending = 0
     sel.innerHTML = '<option value="">— choose a group —</option>' +
-      r.groups.map(g => `<option value="${esc(g.subject)}">${esc(g.subject)} (${g.participants})</option>`).join('')
-    toast(`Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''}`)
+      r.groups.map(g => {
+        const isWatched = watched.has(g.subject)
+        if (!isWatched) pending++
+        const mark = isWatched ? '✓' : '⚠'
+        const tail = isWatched ? '' : ' — not monitored'
+        return `<option value="${esc(g.subject)}">${mark} ${esc(g.subject)} (${g.participants})${tail}</option>`
+      }).join('')
+    toast(pending ? `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · ⚠ ${pending} not monitored` : `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · all monitored`)
   } finally { btn.disabled = false; btn.textContent = label }
 }
 $('#watchGroupSelect').onchange = (e) => {
   if (!e.target.value) return
   $('#watchKind').value = 'group'; $('#watchValue').value = e.target.value
+  state.watchPicked = e.target.value // authoritative name → enables self-heal on Add
 }
 
 /* ---------- KEYWORDS ---------- */
@@ -628,9 +696,11 @@ document.addEventListener('click', (e) => {
     case 'dismissgroup': dismissNewGroup(a.sid, a.jid); break
   }
 })
-function dropNewGroup(sid, jid) {
+async function dropNewGroup(sid, jid) {
   state.newGroups = state.newGroups.filter(g => !(g.jid === jid && g.sessionId === sid))
-  saveNewGroups(); renderNewGroupBanner()
+  renderNewGroupBanner(); updateNewGroupBadge()
+  // Clear it from the server queue so it stays dismissed for every admin.
+  try { await del(`/pending-groups?sid=${encodeURIComponent(sid)}&jid=${encodeURIComponent(jid)}`) } catch {}
 }
 window.dismissNewGroup = (sid, jid) => dropNewGroup(sid, jid)
 window.addGroupWatch = async (sid, jid) => {
@@ -687,6 +757,8 @@ function startApp(me) {
   refreshLicenseBanner()
   setInterval(() => { if (state.view === 'license') tickCountdown() }, 1000) // live countdown
   go(location.hash.slice(1) || 'dashboard')
+  // Surface pending new-group alerts from any landing view (admins only).
+  loadPendingGroups().then(updateNewGroupBadge)
 }
 
 /* ---------- global search ---------- */
