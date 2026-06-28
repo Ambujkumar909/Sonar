@@ -58,8 +58,10 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 // ============================================================================
 app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const { username, password } = req.body || {}
+  const pw = String(password || '')
+  if (pw.length > auth.MAX_PASSWORD_LEN) return bad(res, 'Invalid username or password', 401) // reject oversized before any hashing
   const user = username && await store.getUserByName(String(username).trim())
-  if (!user || !auth.verifyPassword(String(password || ''), user.salt, user.pass_hash)) {
+  if (!user || !(await auth.verifyPassword(pw, user.salt, user.pass_hash))) {
     store.logAudit({ user_id: null, username: username || '?', action: 'login.fail', target: '', detail: '', ip: auth.ipOf(req), ts: Date.now() })
     return bad(res, 'Invalid username or password', 401)
   }
@@ -269,10 +271,10 @@ app.post('/api/users', auth.requireUserAdmin, wrap(async (req, res) => {
   if (!username || !password) return bad(res, 'username & password required')
   const uname = String(username).trim().slice(0, 64)
   if (!uname) return bad(res, 'username required')
-  if (String(password).length < 6) return bad(res, 'password too short (min 6)')
+  if (String(password).length < 6 || String(password).length > auth.MAX_PASSWORD_LEN) return bad(res, `password must be 6–${auth.MAX_PASSWORD_LEN} characters`)
   if (!auth.ROLES.includes(role)) return bad(res, 'invalid role')
   if (await store.getUserByName(uname)) return bad(res, 'username already exists')
-  const { hash, salt } = auth.hashPassword(String(password))
+  const { hash, salt } = await auth.hashPassword(String(password))
   await store.createUser(uname, hash, salt, role)
   auth.audit(req, 'user.create', uname, role); ok(res, {})
 }))
@@ -288,8 +290,8 @@ app.post('/api/users/:id/password', auth.requireUserAdmin, wrap(async (req, res)
   if (!target) return bad(res, 'no such user')
   if (auth.isSuper(target.role)) return bad(res, 'cannot reset the super admin', 403)
   const { next } = req.body || {}
-  if (!next || String(next).length < 6) return bad(res, 'password too short (min 6)')
-  const { hash, salt } = auth.hashPassword(String(next))
+  if (!next || String(next).length < 6 || String(next).length > auth.MAX_PASSWORD_LEN) return bad(res, `password must be 6–${auth.MAX_PASSWORD_LEN} characters`)
+  const { hash, salt } = await auth.hashPassword(String(next))
   await store.setPassword(target.id, hash, salt); auth.audit(req, 'user.password.reset', target.username); ok(res, {})
 }))
 
@@ -312,9 +314,9 @@ app.delete('/api/grants/:id', auth.requireUserAdmin, wrap(async (req, res) => { 
 app.post('/api/password', wrap(async (req, res) => {
   const { current, next } = req.body || {}
   const u = await store.getUserById(req.user.id)
-  if (!u || !auth.verifyPassword(String(current || ''), u.salt, u.pass_hash)) return bad(res, 'current password wrong', 403)
-  if (!next || String(next).length < 6) return bad(res, 'new password too short (min 6)')
-  const { hash, salt } = auth.hashPassword(String(next))
+  if (!u || !(await auth.verifyPassword(String(current || ''), u.salt, u.pass_hash))) return bad(res, 'current password wrong', 403)
+  if (!next || String(next).length < 6 || String(next).length > auth.MAX_PASSWORD_LEN) return bad(res, `new password must be 6–${auth.MAX_PASSWORD_LEN} characters`)
+  const { hash, salt } = await auth.hashPassword(String(next))
   await store.setPassword(u.id, hash, salt); auth.audit(req, 'password.change'); ok(res, {})
 }))
 
