@@ -531,14 +531,18 @@ body {
 .chat-item.active { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, var(--surface-2)), var(--surface-2)); box-shadow: inset 0 0 0 1px var(--border-2); }
 
 /* header */
-.chat-view-head { padding: 0; border-bottom: 1px solid var(--border); min-height: 76px; display: flex; align-items: center; }
+.chat-view-head { padding: 0; border-bottom: 1px solid var(--border); display: flex; align-items: stretch; }
 .ch-empty { padding: 24px; color: var(--ink-faint); font-weight: 600; }
-.chat-hero { display: flex; align-items: center; gap: 14px; padding: 16px 22px; width: 100%; }
-.chat-hero .hav { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  background: linear-gradient(135deg, var(--accent), var(--gold)); color: var(--accent-ink); font-weight: 800; font-size: 18px; box-shadow: 0 8px 20px -8px rgba(0,0,0,.45); }
-.chat-hero .hname { font-family: var(--font-display); font-size: 22px; font-weight: 600; letter-spacing: -.3px; }
-.chat-hero .hmeta { font-size: 12.5px; color: var(--ink-faint); }
-.chat-hero .hactions { margin-left: auto; display: flex; gap: 8px; }
+/* stacked, uncluttered: identity on top, action row beneath */
+.chat-hero { display: flex; flex-direction: column; gap: 12px; padding: 14px 20px; width: 100%; }
+.chat-hero .ch-id { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.chat-hero .hav { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: linear-gradient(135deg, var(--accent), var(--gold)); color: var(--accent-ink); font-weight: 800; font-size: 15px; box-shadow: 0 6px 16px -8px rgba(0,0,0,.4); }
+.chat-hero .hname { font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: -.2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-hero .hmeta { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+.chat-hero .hactions { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-hero .hactions .btn { font-size: 12px; padding: 6px 12px; font-weight: 700; }
 
 /* messages — premium */
 .messages { gap: 4px; padding: 24px 28px; scroll-behavior: smooth; }

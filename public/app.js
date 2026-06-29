@@ -340,10 +340,12 @@ async function loadMessages() {
   const exportBase = `/api/export/${state.chatSession}?jid=${encodeURIComponent(state.chatJid)}`
   $('#chatHead').innerHTML = `
     <div class="chat-hero">
-      <div class="hav">${initials(name)}</div>
-      <div style="min-width:0">
-        <div class="hname">${esc(name)}</div>
-        <div class="hmeta">${isGroup ? 'Group' : 'Direct'} · ${messages.length} messages · read-only</div>
+      <div class="ch-id">
+        <div class="hav">${initials(name)}</div>
+        <div style="min-width:0">
+          <div class="hname">${esc(name)}</div>
+          <div class="hmeta">${isGroup ? 'Group' : 'Direct'} · ${messages.length} messages · read-only</div>
+        </div>
       </div>
       <div class="hactions">
         <a class="btn" href="${exportBase}&fmt=txt">⬇ Export .txt</a>
