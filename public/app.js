@@ -441,16 +441,19 @@ $('#fetchGroupsBtn').onclick = async () => {
     const r = await api(`/sessions/${sid}/groups/live`)
     if (!r.ok) return toast(r.error || 'Could not fetch groups', 'err')
     if (!r.groups.length) { sel.innerHTML = '<option value="">No groups found</option>'; return toast('No groups on this session') }
-    // Mark which groups are already on the watchlist so unmonitored ones stand out.
+    // Mark which groups are already on the watchlist. Match tolerantly (ignore
+    // case/spacing/punctuation) so a hand-typed entry like "D Decor…" still
+    // registers against the real "D'Decor…" group instead of misreading ⚠.
     const wr = await api('/watch?sid=' + encodeURIComponent(sid))
-    const watched = new Set((wr.ok ? wr.watch : []).filter(w => w.kind === 'group').map(w => w.value))
-    let pending = 0
+    const watchedKeys = new Set((wr.ok ? wr.watch : []).filter(w => w.kind === 'group').map(w => looseGroup(w.value)))
+    const rows = r.groups.map(g => ({ ...g, watched: watchedKeys.has(looseGroup(g.subject)) }))
+    // Unmonitored groups first (what you act on), then monitored; alphabetical within each.
+    rows.sort((a, b) => (a.watched - b.watched) || a.subject.localeCompare(b.subject))
+    const pending = rows.filter(g => !g.watched).length
     sel.innerHTML = '<option value="">— choose a group —</option>' +
-      r.groups.map(g => {
-        const isWatched = watched.has(g.subject)
-        if (!isWatched) pending++
-        const mark = isWatched ? '✓' : '⚠'
-        const tail = isWatched ? '' : ' — not monitored'
+      rows.map(g => {
+        const mark = g.watched ? '✓' : '⚠'
+        const tail = g.watched ? '' : ' — not monitored'
         return `<option value="${esc(g.subject)}">${mark} ${esc(g.subject)} (${g.participants})${tail}</option>`
       }).join('')
     toast(pending ? `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · ⚠ ${pending} not monitored` : `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · all monitored`)
