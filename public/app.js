@@ -169,9 +169,16 @@ async function renderDashboard() {
   const max = Math.max(1, ...a.hourly.map(h => h.n))
   const byBucket = Object.fromEntries(a.hourly.map(h => [h.bucket, h.n]))
   const nowB = Math.floor(Date.now() / 3600000)
-  let bars = ''
-  for (let i = 23; i >= 0; i--) { const n = byBucket[nowB - i] || 0; bars += `<div class="bar" style="height:${(n / max) * 100}%" title="${n} msgs"></div>` }
+  const fmtHr = (h) => { let hh = h % 12; if (hh === 0) hh = 12; return hh + (h < 12 ? 'am' : 'pm') } // 12am · 6am · 12pm · 6pm
+  let bars = '', axis = ''
+  for (let i = 23; i >= 0; i--) {
+    const b = nowB - i, n = byBucket[b] || 0
+    const hour = new Date(b * 3600000).getHours()
+    bars += `<div class="bar" style="height:${(n / max) * 100}%" title="${fmtHr(hour)} · ${n} msg${n === 1 ? '' : 's'}"></div>`
+    axis += `<span>${hour % 6 === 0 ? fmtHr(hour) : ''}</span>` // label every 6h
+  }
   $('#hourlyBars').innerHTML = bars
+  $('#hourlyAxis').innerHTML = axis
 
   $('#topChats').innerHTML = a.topChats.length ? a.topChats.map(c => `
     <div class="topchat" data-act="opentop" data-sid="${esc(c.session_id)}" data-jid="${esc(c.chat_jid)}" title="Open in Recent Chats">
@@ -290,10 +297,12 @@ const dayLabel = (ts) => {
 async function renderChats() {
   // A dashboard "most active chats" click asks us to jump straight into a chat.
   const pending = state.pendingOpenChat; state.pendingOpenChat = null
-  if (pending) { state.chatSession = pending.sid; state.chatJid = pending.jid }
-  const sel = $('#chatSession'); fillSessionSelect(sel, state.chatSession)
-  state.chatSession = sel.value || (state.sessions[0] && state.sessions[0].id)
+  const sel = $('#chatSession')
+  fillSessionSelect(sel, pending ? pending.sid : state.chatSession)
+  // pending.sid is authoritative — don't let the dropdown reset clobber it
+  state.chatSession = (pending && pending.sid) || sel.value || (state.sessions[0] && state.sessions[0].id)
   sel.value = state.chatSession || ''
+  if (pending) state.chatJid = pending.jid
   state.chatSeg = state.chatSeg || 'all'
   state.chatScope = state.chatScope || 'active'
   sel.onchange = () => { state.chatSession = sel.value; state.chatJid = null; loadChatList() }
@@ -307,7 +316,7 @@ async function renderChats() {
     b.onclick = () => { state.chatScope = b.dataset.scope; $$('#chatScope .seg').forEach(x => x.classList.toggle('active', x === b)); state.chatJid = null; loadChatList() }
   })
   await loadChatList()
-  if (pending) await loadMessages() // open the conversation the dashboard asked for
+  if (pending && state.chatJid) await loadMessages() // open the conversation the dashboard asked for
 }
 async function loadChatList() {
   if (!state.chatSession) { $('#chatList').innerHTML = '<div class="empty">No session granted.</div>'; return }

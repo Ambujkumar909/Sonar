@@ -295,6 +295,8 @@ input.in::placeholder { color: var(--ink-faint); }
 .bars { display: flex; align-items: flex-end; gap: 5px; height: 160px; padding-top: 8px; }
 .bars .bar { flex: 1; background: linear-gradient(180deg, var(--accent), color-mix(in srgb,var(--accent) 40%, var(--gold))); border-radius: 6px 6px 0 0; min-height: 3px; transition: var(--t); }
 .bars .bar:hover { filter: brightness(1.15); }
+.bar-axis { display: flex; gap: 5px; margin-top: 6px; }
+.bar-axis span { flex: 1; text-align: center; font-size: 10.5px; font-weight: 700; color: var(--ink-faint); white-space: nowrap; }
 
 .section-title { font-family: var(--font-display); font-size: 22px; font-weight: 600; margin: 6px 0 14px; }
 .empty { padding: 50px; text-align: center; color: var(--ink-faint); font-size: 15px; }
