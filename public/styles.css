@@ -245,6 +245,8 @@ table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 th { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-faint); font-weight: 800; }
 tr:hover td { background: var(--surface); }
+th.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+th.th-sort:hover { color: var(--ink); }
 
 /* ===================== FORMS / CHIPS ===================== */
 .field { display: flex; flex-direction: column; gap: 6px; }

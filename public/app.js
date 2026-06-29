@@ -381,14 +381,34 @@ const normGroup = (s) => (s || '').trim().toLowerCase()
 // hand-typed entry against the authoritative name picked from the dropdown.
 const looseGroup = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
 function drawWatchTable(watch, nameById, sizeMap) {
-  const members = (w) => {
-    if (w.kind !== 'group') return '—'
+  state.watchRender = { watch, nameById, sizeMap } // cache so header clicks re-sort without refetching
+  const memVal = (w) => {
+    if (w.kind !== 'group') return null
     const live = sizeMap[w.session_id] && sizeMap[w.session_id][normGroup(w.value)]
     if (live != null) return live                 // freshest: live group size
-    return (w.members != null ? w.members : '—')  // stored fallback
+    return (w.members != null ? w.members : null) // stored fallback
   }
-  $('#watchTable').innerHTML = `<thead><tr><th>Session</th><th>Type</th><th>Value</th><th>Members</th><th></th></tr></thead><tbody>${
-    watch.length ? watch.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td>${members(w)}</td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
+  const memCell = (w) => { const v = memVal(w); return v != null ? v : '—' }
+  const s = state.watchSort
+  const rows = watch.slice()
+  if (s && s.key === 'value') {
+    rows.sort((a, b) => s.dir * String(a.value || '').localeCompare(String(b.value || ''), undefined, { sensitivity: 'base' }))
+  } else if (s && s.key === 'members') {
+    rows.sort((a, b) => {
+      const av = memVal(a), bv = memVal(b)
+      if (av == null && bv == null) return 0
+      if (av == null) return 1   // unknown / non-group rows always sink to the bottom
+      if (bv == null) return -1
+      return s.dir * (av - bv)
+    })
+  }
+  const ind = (key) => (s && s.key === key) ? (s.dir > 0 ? ' ▲' : ' ▼') : ''
+  $('#watchTable').innerHTML =
+    `<thead><tr><th>Session</th><th>Type</th>`
+    + `<th class="th-sort" data-act="sortwatch" data-key="value">Value${ind('value')}</th>`
+    + `<th class="th-sort" data-act="sortwatch" data-key="members">Members${ind('members')}</th>`
+    + `<th></th></tr></thead><tbody>${
+    rows.length ? rows.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td>${memCell(w)}</td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
     : '<tr><td colspan="5"><div class="empty">Watchlist empty — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
 }
 async function renderWatchlist() {
@@ -705,6 +725,13 @@ document.addEventListener('click', (e) => {
     case 'delgrant': delGrant(a.id); break
     case 'addgroupwatch': addGroupWatch(a.sid, a.jid); break
     case 'dismissgroup': dismissNewGroup(a.sid, a.jid); break
+    case 'sortwatch': {
+      const s = state.watchSort
+      state.watchSort = (s && s.key === a.key) ? { key: a.key, dir: -s.dir } : { key: a.key, dir: 1 }
+      const r = state.watchRender
+      if (r) drawWatchTable(r.watch, r.nameById, r.sizeMap)
+      break
+    }
   }
 })
 async function dropNewGroup(sid, jid) {
