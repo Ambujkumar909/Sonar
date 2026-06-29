@@ -610,7 +610,7 @@ body {
 
 /* dashboard "most active chats" — auto-adapting rows (no overflow) */
 .topchat { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 10px 12px; border-radius: 10px; transition: background .2s; }
+  padding: 10px 12px; border-radius: 10px; transition: background .2s; cursor: pointer; }
 .topchat:hover { background: var(--surface); }
 .topchat .tc-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topchat .tc-n { flex: none; color: var(--ink-faint); font-size: 13px; font-weight: 700; }

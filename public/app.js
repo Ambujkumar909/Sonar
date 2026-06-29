@@ -174,7 +174,8 @@ async function renderDashboard() {
   $('#hourlyBars').innerHTML = bars
 
   $('#topChats').innerHTML = a.topChats.length ? a.topChats.map(c => `
-    <div class="topchat"><span class="tc-name">${esc(c.chat_name || '—')}</span><span class="tc-n">${c.n} msgs</span></div>
+    <div class="topchat" data-act="opentop" data-sid="${esc(c.session_id)}" data-jid="${esc(c.chat_jid)}" title="Open in Recent Chats">
+      <span class="tc-name">${esc(c.chat_name || '—')}</span><span class="tc-n">${c.n} msgs</span></div>
   `).join('') : '<div class="empty">No messages yet.</div>'
   renderFeed()
   await loadPendingGroups()
@@ -287,6 +288,9 @@ const dayLabel = (ts) => {
 }
 
 async function renderChats() {
+  // A dashboard "most active chats" click asks us to jump straight into a chat.
+  const pending = state.pendingOpenChat; state.pendingOpenChat = null
+  if (pending) { state.chatSession = pending.sid; state.chatJid = pending.jid }
   const sel = $('#chatSession'); fillSessionSelect(sel, state.chatSession)
   state.chatSession = sel.value || (state.sessions[0] && state.sessions[0].id)
   sel.value = state.chatSession || ''
@@ -303,6 +307,7 @@ async function renderChats() {
     b.onclick = () => { state.chatScope = b.dataset.scope; $$('#chatScope .seg').forEach(x => x.classList.toggle('active', x === b)); state.chatJid = null; loadChatList() }
   })
   await loadChatList()
+  if (pending) await loadMessages() // open the conversation the dashboard asked for
 }
 async function loadChatList() {
   if (!state.chatSession) { $('#chatList').innerHTML = '<div class="empty">No session granted.</div>'; return }
@@ -688,6 +693,7 @@ document.addEventListener('click', (e) => {
     case 'watchall': toggleWatchAll(a.id, a.val); break
     case 'delsess': removeSession(a.id, a.name); break
     case 'openchat': if (a.sid) state.chatSession = a.sid; openChat(a.jid); break
+    case 'opentop': state.pendingOpenChat = { sid: a.sid, jid: a.jid }; go('chats'); break
     case 'dellog': delLog(a.jid); break
     case 'delwatch': delWatch(a.id); break
     case 'delkw': delKeyword(a.id); break

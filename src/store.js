@@ -247,8 +247,8 @@ module.exports = {
   topChats: (limit = 8, ids) => {
     if (ids && ids.length === 0) return []
     return ids
-      ? all(`SELECT chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL AND session_id = ANY($1) GROUP BY chat_jid, chat_name ORDER BY n DESC LIMIT $2`, [ids, limit])
-      : all(`SELECT chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL GROUP BY chat_jid, chat_name ORDER BY n DESC LIMIT $1`, [limit])
+      ? all(`SELECT session_id, chat_jid, chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL AND session_id = ANY($1) GROUP BY session_id, chat_jid, chat_name ORDER BY n DESC LIMIT $2`, [ids, limit])
+      : all(`SELECT session_id, chat_jid, chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL GROUP BY session_id, chat_jid, chat_name ORDER BY n DESC LIMIT $1`, [limit])
   },
   cleanupOld: async (days = 30) => {
     const cutoff = Date.now() - days * 24 * 3600 * 1000
