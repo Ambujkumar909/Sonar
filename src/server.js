@@ -19,6 +19,7 @@ const auth = require('./auth')
 const textlog = require('./textlog')
 const license = require('./license')
 const report = require('./report')
+const chatExport = require('./chatExport')
 const SessionManager = require('./sessionManager')
 
 const app = express()
@@ -248,6 +249,18 @@ app.get('/api/report', wrap(async (req, res) => {
     auth.audit(req, 'report.download')
   }
   res.type('html').send(html)
+}))
+
+// ---- raw chat data export (for offline analysis in Claude Code — no API) ----
+app.get('/api/report/chats', wrap(async (req, res) => {
+  const ids = await idsFor(req)
+  const { text } = await chatExport.buildTranscript({ ids, days: reportDays(req.query.days) })
+  const body = text || 'No messages in the selected window.'
+  if (req.query.download) {
+    res.setHeader('Content-Disposition', `attachment; filename="whatsapp-chats-${new Date().toISOString().slice(0, 10)}.txt"`)
+    auth.audit(req, 'chats.download')
+  }
+  res.type('text/plain; charset=utf-8').send(body)
 }))
 
 // ---- saved AI reports (generate once, store, reuse — no repeat API spend) ----

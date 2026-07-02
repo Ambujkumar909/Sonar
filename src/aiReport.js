@@ -8,7 +8,7 @@
 //  api.anthropic.com. Admin-gated at the route level (it costs per run).
 // =============================================================
 const Anthropic = require('@anthropic-ai/sdk')
-const store = require('./store')
+const { buildTranscript } = require('./chatExport')
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const isConfigured = () => !!process.env.ANTHROPIC_API_KEY
@@ -97,25 +97,8 @@ ${d.unanswered.map((u) => `<tr><td><strong>${esc(u.chat)}</strong></td><td>${esc
 async function analyze({ ids, days = null, generatedAt = Date.now() } = {}) {
   if (!isConfigured()) throw new Error('ANTHROPIC_API_KEY is not set on the server')
 
-  const scoped = Array.isArray(ids)
-  if (scoped && ids.length === 0) return { html: '<div class="note">No sessions granted — nothing to analyze.</div>' }
-  const conds = ["text IS NOT NULL AND text <> ''"], p = []
-  if (scoped) { p.push(ids); conds.push(`session_id = ANY($${p.length})`) }
-  if (days) { p.push(generatedAt - days * 86400000); conds.push(`ts >= $${p.length}`) }
-  const where = ' WHERE ' + conds.join(' AND ')
-  const rows = (await store.pool.query(
-    `SELECT chat_name, sender_name, from_me, ts, text FROM messages${where} ORDER BY chat_name, ts ASC LIMIT 20000`, p)).rows
-  if (!rows.length) return { html: '<div class="note">No messages in the selected window to analyze.</div>' }
-
-  // group by chat, chronological
-  let transcript = '', truncated = false, lastChat = null
-  for (const m of rows) {
-    if (m.chat_name !== lastChat) { transcript += `\n\n### ${m.chat_name || 'Unknown chat'}\n`; lastChat = m.chat_name }
-    const who = m.from_me ? 'TEAM' : `dealer(${m.sender_name || '?'})`
-    const line = `[${new Date(Number(m.ts)).toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).slice(0, 16)} IST] ${who}: ${String(m.text).replace(/\s+/g, ' ').trim()}\n`
-    if (transcript.length + line.length > MAX_TRANSCRIPT_CHARS) { truncated = true; break }
-    transcript += line
-  }
+  const { text: transcript, messages, truncated } = await buildTranscript({ ids, days, cap: MAX_TRANSCRIPT_CHARS, generatedAt })
+  if (!messages) return { html: '<div class="note">No messages in the selected window to analyze.</div>' }
 
   const client = new Anthropic() // reads ANTHROPIC_API_KEY
   const stream = client.messages.stream({

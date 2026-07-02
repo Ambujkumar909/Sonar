@@ -221,21 +221,10 @@ async function renderReports() {
   const daysSel = $('#reportDays'), dl = $('#reportDownload'), aiBtn = $('#reportAi'), metricsBtn = $('#reportMetrics'), status = $('#reportStatus')
   const admin = isAdminish()
   const win = () => { const d = daysSel && daysSel.value; return d && d !== 'all' ? '&days=' + encodeURIComponent(d) : '' }
-  const viewMetrics = () => { if (status) status.textContent = ''; frame.src = '/api/report?t=' + Date.now() + win() }
+  const syncDownload = () => { if (dl) dl.href = '/api/report/chats?download=1' + win() } // top download = raw chat data (no API)
+  const viewMetrics = () => { if (status) status.textContent = ''; frame.src = '/api/report?t=' + Date.now() + win(); syncDownload() }
 
   frame.onload = () => { if (status && status.dataset.busy !== '1') status.textContent = '' }
-  // Download whatever is CURRENTLY in the iframe (same-origin) — never re-run the server/AI.
-  if (dl) dl.onclick = (e) => {
-    const doc = frame.contentDocument
-    if (!doc || !doc.documentElement) return
-    e.preventDefault()
-    const html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
-    const a = document.createElement('a')
-    a.href = url; a.download = 'whatsapp-report-' + new Date().toISOString().slice(0, 10) + '.html'
-    document.body.appendChild(a); a.click(); a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 2000)
-  }
   if (metricsBtn) metricsBtn.onclick = viewMetrics
   if (daysSel) daysSel.onchange = viewMetrics
 
@@ -243,6 +232,7 @@ async function renderReports() {
   if (aiBtn) {
     aiBtn.style.display = admin ? '' : 'none'
     aiBtn.onclick = async () => {
+      if (!confirm('Generate an AI report now?\n\nThis calls the Claude API and incurs cost. The result is saved under "Saved AI reports" below, where you can open or download it anytime without regenerating.')) return
       status.dataset.busy = '1'; status.textContent = '⏳ Generating AI report… this can take up to a minute.'; aiBtn.disabled = true
       try {
         const r = await post('/reports?days=' + encodeURIComponent(daysSel.value || 'all'), {})

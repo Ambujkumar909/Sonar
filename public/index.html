@@ -90,11 +90,11 @@
               <option value="all">All captured</option>
             </select>
             <button class="btn" id="reportMetrics">📊 View metrics</button>
+            <a class="btn" id="reportDownload" href="#">⬇ Download chat data</a>
             <button class="btn primary" id="reportAi" style="display:none">✨ Generate AI report</button>
-            <a class="btn" id="reportDownload" href="#">⬇ Download</a>
           </div>
         </div>
-        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-soft)"><b>View metrics</b> is free and live. <b>Generate AI report</b> runs the analysis once and <b>saves it below</b> — open a saved report anytime without spending API tokens again. <span id="reportStatus" style="color:var(--warn);font-weight:700"></span></p>
+        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-soft)"><b>View metrics</b> is free and live. <b>⬇ Download chat data</b> saves the raw chat transcripts for the selected window (for offline analysis in Claude Code — no API cost). <b>✨ Generate AI report</b> confirms first, runs the Claude analysis once, and saves it under <b>Saved AI reports</b> below — open/download it there without regenerating. <span id="reportStatus" style="color:var(--warn);font-weight:700"></span></p>
       </div>
       <div class="card admin-only" id="savedReportsCard" style="margin-bottom:18px">
         <h3>Saved AI reports</h3>
