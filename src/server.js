@@ -18,6 +18,7 @@ const store = require('./store')
 const auth = require('./auth')
 const textlog = require('./textlog')
 const license = require('./license')
+const report = require('./report')
 const SessionManager = require('./sessionManager')
 
 const app = express()
@@ -231,6 +232,20 @@ app.post('/api/keywords', auth.requireWrite, wrap(async (req, res) => {
   await store.addKeyword(word); auth.audit(req, 'keyword.add', word); ok(res, {})
 }))
 app.delete('/api/keywords/:id', auth.requireWrite, wrap(async (req, res) => { await store.delKeyword(Number(req.params.id)); auth.audit(req, 'keyword.del', req.params.id); ok(res, {}) }))
+
+// ---- report ----------------------------------------------------------------
+// Renders the WhatsApp activity report (scoped to the caller's sessions).
+// ?download=1 forces a file download; otherwise it's served inline for viewing.
+app.get('/api/report', wrap(async (req, res) => {
+  const ids = await idsFor(req)
+  const { html } = await report.generateReport({ ids })
+  if (req.query.download) {
+    const fn = `whatsapp-report-${new Date().toISOString().slice(0, 10)}.html`
+    res.setHeader('Content-Disposition', `attachment; filename="${fn}"`)
+    auth.audit(req, 'report.download')
+  }
+  res.type('html').send(html)
+}))
 
 // ---- analytics & events ----------------------------------------------------
 app.get('/api/stats', wrap(async (req, res) => ok(res, { stats: await store.stats(await idsFor(req)) })))

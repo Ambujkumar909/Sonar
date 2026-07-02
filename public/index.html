@@ -19,6 +19,7 @@
 
     <nav class="nav" id="nav">
       <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
+      <button data-view="reports"><span class="ico">📊</span> Reports</button>
       <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
       <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
       <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
@@ -70,6 +71,23 @@
       <div class="card" style="margin-top:18px">
         <h3>Live feed</h3>
         <div class="feed" id="liveFeed"><div class="empty">Waiting for incoming messages…</div></div>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="view-reports" class="view hide">
+      <div class="card" style="margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <h3 style="margin:0">WhatsApp Activity Report</h3>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn" id="reportRefresh">↻ Refresh</button>
+            <a class="btn primary" id="reportDownload" href="/api/report?download=1">⬇ Download</a>
+          </div>
+        </div>
+        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-soft)">Auto-generated from captured chats, scoped to your sessions. Download saves an HTML copy — Ctrl+P → Save as PDF for a PDF.</p>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <iframe id="reportFrame" title="WhatsApp Activity Report" style="width:100%;height:calc(100vh - 280px);min-height:420px;border:0;background:#fff;border-radius:14px;display:block"></iframe>
       </div>
     </section>
 

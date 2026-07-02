@@ -34,7 +34,7 @@ const urlTheme = new URLSearchParams(location.search).get('theme')
 applyTheme(urlTheme || localStorage.getItem('sonar-theme') || 'light')
 
 /* ---------- navigation ---------- */
-const TITLES = { dashboard: 'Dashboard', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
+const TITLES = { dashboard: 'Dashboard', reports: 'Reports', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
 function go(view) {
   if (!TITLES[view]) view = 'dashboard'
   // route guards (defence in depth — API enforces too)
@@ -118,7 +118,7 @@ function refreshChrome() {
    RENDER ROUTER
    ============================================================= */
 function render(view) {
-  ({ dashboard: renderDashboard, sessions: renderSessions, chats: renderChats,
+  ({ dashboard: renderDashboard, reports: renderReports, sessions: renderSessions, chats: renderChats,
      watchlist: renderWatchlist, keywords: renderKeywords, health: renderHealth,
      audit: renderAudit, license: renderLicense, users: renderUsers, files: renderFiles, about: renderAbout }[view] || (() => {}))()
   requestAnimationFrame(() => stagger($('#view-' + view)))
@@ -213,6 +213,14 @@ function renderFeed() {
   el.innerHTML = state.feed.map(m => `
     <div class="f"><div class="top"><span class="ch">${esc(m.chat_name)} ${m.is_group ? '<span class="gtag">group</span>' : ''}</span><span class="tm" style="font-size:11px;color:var(--ink-faint)">${fmtClock(m.ts)}</span></div>
     <div class="tx"><span class="sn">${esc(m.sender_name)}:</span> ${esc(m.text)}</div></div>`).join('')
+}
+
+/* ---------- REPORTS ---------- */
+function renderReports() {
+  const frame = $('#reportFrame'); if (!frame) return
+  const load = () => { frame.src = '/api/report?t=' + Date.now() } // cache-bust so Refresh re-runs the query
+  load()
+  const btn = $('#reportRefresh'); if (btn) btn.onclick = load
 }
 
 /* ---------- SESSIONS ---------- */
