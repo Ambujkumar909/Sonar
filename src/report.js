@@ -54,49 +54,26 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
   if (days) { p.push(generatedAt - days * 86400000); conds.push(`ts >= $${p.length}`) }
   const filt = conds.length ? ' WHERE ' + conds.join(' AND ') : ''
 
-  const sessions = (await q('SELECT id, name FROM sessions' + (scoped ? ' WHERE id = ANY($1)' : ''), scoped ? [ids] : [])).rows
-  const nameById = Object.fromEntries(sessions.map((s) => [s.id, s.name]))
-
-  const chats = (await q(`SELECT session_id, chat_jid, chat_name, is_group,
-      COUNT(*)::int n, COALESCE(SUM(from_me),0)::int team, MAX(ts) last_ts
-    FROM messages${filt} GROUP BY session_id, chat_jid, chat_name, is_group ORDER BY n DESC`, p)).rows
-
-  const lastMsgs = (await q(`SELECT DISTINCT ON (session_id, chat_jid) session_id, chat_jid, chat_name, from_me, ts, text, has_media
-    FROM messages${filt} ORDER BY session_id, chat_jid, ts DESC`, p)).rows
-
-  const range = (await q(`SELECT MIN(ts) mn, MAX(ts) mx FROM messages${filt}`, p)).rows[0] || {}
-
-  const totalMsgs = chats.reduce((a, c) => a + c.n, 0)
-  const totalTeam = chats.reduce((a, c) => a + c.team, 0)
-  const totalDealer = totalMsgs - totalTeam
+  const t = (await q(`SELECT COUNT(*)::int n, COALESCE(SUM(from_me),0)::int team,
+      COUNT(DISTINCT (session_id, chat_jid))::int chats, MIN(ts) mn, MAX(ts) mx
+    FROM messages${filt}`, p)).rows[0] || {}
+  const range = { mn: t.mn, mx: t.mx }
+  const totalMsgs = t.n || 0, totalTeam = t.team || 0, totalDealer = totalMsgs - totalTeam, chatCount = t.chats || 0
 
   const windowLabel = days ? `Last ${days} day${days > 1 ? 's' : ''}` : 'All captured data'
   let h = `<h1>${title}</h1>
 <p class="meta"><strong>Window:</strong> ${esc(windowLabel)} &nbsp;|&nbsp; <strong>Data range:</strong> ${fmtDate(range.mn)} → ${fmtDate(range.mx)} &nbsp;|&nbsp; <strong>Generated:</strong> ${esc(genOn)}</p>
-<p class="meta"><strong>Coverage:</strong> ${chats.length} chats across ${sessions.length} session(s)</p>
+<p class="meta"><strong>Coverage:</strong> ${chatCount} chats monitored</p>
 <p class="meta"><strong>Volume:</strong> ${totalMsgs.toLocaleString('en-IN')} messages — <strong>${totalTeam.toLocaleString('en-IN')} team (${pct(totalTeam, totalMsgs)}%) / ${totalDealer.toLocaleString('en-IN')} dealer (${pct(totalDealer, totalMsgs)}%)</strong></p>`
 
   if (totalMsgs === 0) {
     h += `<div class="crit"><strong>No messages captured yet.</strong> There is no stored chat data to report on. This is expected until a WhatsApp session is linked and it captures watchlisted chats.</div>`
-    return { html: shell(h, title), stats: { messages: 0, chats: 0, sessions: sessions.length } }
+    return { html: shell(h, title), stats: { messages: 0, chats: 0 } }
   }
 
-  // per-session rollup
-  const bySession = {}
-  for (const c of chats) {
-    ;(bySession[c.session_id] ||= { chats: 0, n: 0, team: 0, top: [] })
-    const b = bySession[c.session_id]; b.chats++; b.n += c.n; b.team += c.team; b.top.push(c)
-  }
-  const sessionRows = Object.entries(bySession).map(([sid, v]) => ({
-    name: nameById[sid] || sid, chats: v.chats, n: v.n, team: v.team, dealer: v.n - v.team,
-    busiest: v.top.sort((a, b) => b.n - a.n).slice(0, 4).map((c) => c.chat_name || '—').join(', '),
-  })).sort((a, b) => b.n - a.n)
+  h += `<div class="note"><strong>About this report.</strong> Generated from Sonar's captured WhatsApp chats. <em>Team vs Dealer</em> is derived from message direction (outgoing = team; incoming = dealer).</div>`
 
-  const awaiting = lastMsgs.filter((m) => !m.from_me).sort((a, b) => Number(b.ts) - Number(a.ts))
-
-  h += `<div class="note"><strong>About this report.</strong> Auto-generated from Sonar's captured WhatsApp data. <em>Team vs Dealer</em> is derived from message direction (the monitored account's outgoing = team; incoming = dealer). The metric tables are exact.</div>`
-
-  // Optional AI narrative sections (executive summary, escalations, quality, actions)
+  // AI narrative sections (executive summary, escalations, service quality, action list)
   if (ai) {
     try {
       const a = await aiReport.analyze({ ids, days, generatedAt })
@@ -104,34 +81,19 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
     } catch (e) {
       h += `<div class="crit"><strong>AI analysis unavailable.</strong> ${esc(e.message)}</div>`
     }
+  } else {
+    h += `<div class="note">Click <strong>Generate AI report</strong> for the full analysis — executive summary, critical escalations, service-quality assessment, and consolidated action list.</div>`
   }
 
   h += `<hr>
-
-<h2>1. Session Activity Snapshot</h2>
-<table><tr><th>Session</th><th class="num">Chats</th><th class="num">Msgs</th><th>Team / Dealer</th><th>Busiest chats</th></tr>
-${sessionRows.map((s) => `<tr><td><strong>${esc(s.name)}</strong></td><td class="num">${s.chats}</td><td class="num">${s.n}</td><td>${s.team} / ${s.dealer}</td><td>${esc(s.busiest)}</td></tr>`).join('')}
-</table><hr>
-
-<h2>2. Busiest Chats</h2>
-<table><tr><th>#</th><th>Chat</th><th>Session</th><th>Type</th><th class="num">Msgs</th><th>Team / Dealer</th><th>Last activity</th></tr>
-${chats.slice(0, 25).map((c, i) => `<tr><td class="num">${i + 1}</td><td><strong>${esc(c.chat_name || '—')}</strong></td><td>${esc(nameById[c.session_id] || c.session_id)}</td><td>${c.is_group ? 'Group' : 'Direct'}</td><td class="num">${c.n}</td><td>${c.team} / ${c.n - c.team}</td><td>${fmtDateTime(c.last_ts)}</td></tr>`).join('')}
-</table><hr>
-
-<h2>3. Awaiting Reply — last message was from the dealer</h2>
-<table><tr><th>Chat</th><th>Session</th><th>Last dealer message</th><th>When</th></tr>
-${awaiting.slice(0, 30).map((m) => `<tr><td><strong>${esc(m.chat_name || '—')}</strong></td><td>${esc(nameById[m.session_id] || m.session_id)}</td><td>${m.has_media && !m.text ? '<em>[media]</em>' : esc(clip(m.text))}</td><td>${fmtDateTime(m.ts)}</td></tr>`).join('')}
-</table>${awaiting.length > 30 ? `<p class="meta">…and ${awaiting.length - 30} more.</p>` : ''}<hr>
-
-<h2>4. Methodology &amp; Caveats</h2>
+<h2>Methodology &amp; Caveats</h2>
 <ul>
-<li>Generated from Sonar's <code>messages</code> table — only watchlisted chats are captured, so coverage reflects what Sonar was configured to monitor.</li>
-<li><strong>Team vs Dealer</strong> uses message direction (<code>from_me</code>): outgoing = team, incoming = dealer.</li>
-<li>"Awaiting reply" is heuristic (last message from the dealer).</li>
-<li>Grouped by <strong>session</strong>. Escalation/quote analysis is omitted (needs an AI reading pass).</li>
+<li>Generated from Sonar's captured WhatsApp chats — only watchlisted chats are captured.</li>
+<li><strong>Team vs Dealer</strong> uses message direction (outgoing = team, incoming = dealer).</li>
+<li>PO numbers, quantities, and quotes in the AI analysis are as stated in-chat — cross-check ERP for transaction-grade accuracy.</li>
 </ul>`
 
-  return { html: shell(h, title), stats: { messages: totalMsgs, chats: chats.length, sessions: sessions.length } }
+  return { html: shell(h, title), stats: { messages: totalMsgs, chats: chatCount } }
 }
 
 module.exports = { generateReport }
