@@ -236,9 +236,10 @@ app.delete('/api/keywords/:id', auth.requireWrite, wrap(async (req, res) => { aw
 // ---- report ----------------------------------------------------------------
 // Renders the WhatsApp activity report (scoped to the caller's sessions).
 // ?download=1 forces a file download; otherwise it's served inline for viewing.
+const reportDays = (v) => { if (v == null || v === 'all') return null; const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 90 ? n : null }
 app.get('/api/report', wrap(async (req, res) => {
   const ids = await idsFor(req)
-  const { html } = await report.generateReport({ ids })
+  const { html } = await report.generateReport({ ids, days: reportDays(req.query.days) })
   if (req.query.download) {
     const fn = `whatsapp-report-${new Date().toISOString().slice(0, 10)}.html`
     res.setHeader('Content-Disposition', `attachment; filename="${fn}"`)

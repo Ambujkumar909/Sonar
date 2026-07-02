@@ -218,8 +218,14 @@ function renderFeed() {
 /* ---------- REPORTS ---------- */
 function renderReports() {
   const frame = $('#reportFrame'); if (!frame) return
-  const load = () => { frame.src = '/api/report?t=' + Date.now() } // cache-bust so Refresh re-runs the query
+  const daysSel = $('#reportDays'), dl = $('#reportDownload')
+  const win = () => { const d = daysSel && daysSel.value; return d && d !== 'all' ? '&days=' + encodeURIComponent(d) : '' }
+  const load = () => {
+    frame.src = '/api/report?t=' + Date.now() + win()          // cache-bust so it re-runs
+    if (dl) dl.href = '/api/report?download=1' + win()          // keep download in sync with the window
+  }
   load()
+  if (daysSel) daysSel.onchange = load
   const btn = $('#reportRefresh'); if (btn) btn.onclick = load
 }
 

@@ -79,7 +79,16 @@
       <div class="card" style="margin-bottom:18px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <h3 style="margin:0">WhatsApp Activity Report</h3>
-          <div style="margin-left:auto;display:flex;gap:8px">
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="in" id="reportDays" style="padding:8px 10px">
+              <option value="2">Last 2 days</option>
+              <option value="3">Last 3 days</option>
+              <option value="5">Last 5 days</option>
+              <option value="7" selected>Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="all">All captured</option>
+            </select>
             <button class="btn" id="reportRefresh">↻ Refresh</button>
             <a class="btn primary" id="reportDownload" href="/api/report?download=1">⬇ Download</a>
           </div>

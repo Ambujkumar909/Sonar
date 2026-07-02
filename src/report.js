@@ -37,7 +37,7 @@ function shell(inner, title) {
 }
 
 // ids: undefined/null = all sessions; [] = no access; [..] = scoped
-async function generateReport({ ids, generatedAt = Date.now() } = {}) {
+async function generateReport({ ids, days = null, generatedAt = Date.now() } = {}) {
   const scoped = Array.isArray(ids)
   const genOn = fmtDateTime(generatedAt)
   const title = "D'Decor — WhatsApp Activity Report"
@@ -47,10 +47,13 @@ async function generateReport({ ids, generatedAt = Date.now() } = {}) {
   }
 
   const q = (sql, params) => store.pool.query(sql, params)
-  const filt = scoped ? ' WHERE session_id = ANY($1)' : ''
-  const p = scoped ? [ids] : []
+  // message filter: session scope (if any) + optional time window
+  const conds = [], p = []
+  if (scoped) { p.push(ids); conds.push(`session_id = ANY($${p.length})`) }
+  if (days) { p.push(generatedAt - days * 86400000); conds.push(`ts >= $${p.length}`) }
+  const filt = conds.length ? ' WHERE ' + conds.join(' AND ') : ''
 
-  const sessions = (await q('SELECT id, name FROM sessions' + (scoped ? ' WHERE id = ANY($1)' : ''), p)).rows
+  const sessions = (await q('SELECT id, name FROM sessions' + (scoped ? ' WHERE id = ANY($1)' : ''), scoped ? [ids] : [])).rows
   const nameById = Object.fromEntries(sessions.map((s) => [s.id, s.name]))
 
   const chats = (await q(`SELECT session_id, chat_jid, chat_name, is_group,
@@ -66,8 +69,9 @@ async function generateReport({ ids, generatedAt = Date.now() } = {}) {
   const totalTeam = chats.reduce((a, c) => a + c.team, 0)
   const totalDealer = totalMsgs - totalTeam
 
+  const windowLabel = days ? `Last ${days} day${days > 1 ? 's' : ''}` : 'All captured data'
   let h = `<h1>${title}</h1>
-<p class="meta"><strong>Data window:</strong> ${fmtDate(range.mn)} → ${fmtDate(range.mx)} &nbsp;|&nbsp; <strong>Generated:</strong> ${esc(genOn)}</p>
+<p class="meta"><strong>Window:</strong> ${esc(windowLabel)} &nbsp;|&nbsp; <strong>Data range:</strong> ${fmtDate(range.mn)} → ${fmtDate(range.mx)} &nbsp;|&nbsp; <strong>Generated:</strong> ${esc(genOn)}</p>
 <p class="meta"><strong>Coverage:</strong> ${chats.length} chats across ${sessions.length} session(s)</p>
 <p class="meta"><strong>Volume:</strong> ${totalMsgs.toLocaleString('en-IN')} messages — <strong>${totalTeam.toLocaleString('en-IN')} team (${pct(totalTeam, totalMsgs)}%) / ${totalDealer.toLocaleString('en-IN')} dealer (${pct(totalDealer, totalMsgs)}%)</strong></p>`
 
