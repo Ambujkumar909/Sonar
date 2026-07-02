@@ -4,7 +4,7 @@
   "description": "Sonar — read-only WhatsApp intelligence platform (Baileys). Multi-session, self-healing, RBAC + audit.",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node --use-system-ca src/server.js",
     "legacy": "node automate.js",
     "build:secure": "node scripts/build-secure.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "latest",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
     "bytenode": "^1.6.0",

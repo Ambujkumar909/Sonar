@@ -239,7 +239,9 @@ app.delete('/api/keywords/:id', auth.requireWrite, wrap(async (req, res) => { aw
 const reportDays = (v) => { if (v == null || v === 'all') return null; const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 90 ? n : null }
 app.get('/api/report', wrap(async (req, res) => {
   const ids = await idsFor(req)
-  const { html } = await report.generateReport({ ids, days: reportDays(req.query.days) })
+  const ai = !!req.query.ai && auth.isAdminish(req.user.role) // AI pass is admin-only (it costs per run)
+  const { html } = await report.generateReport({ ids, days: reportDays(req.query.days), ai })
+  if (ai) auth.audit(req, 'report.ai')
   if (req.query.download) {
     const fn = `whatsapp-report-${new Date().toISOString().slice(0, 10)}.html`
     res.setHeader('Content-Disposition', `attachment; filename="${fn}"`)

@@ -5,6 +5,7 @@
 //  Team vs Dealer is derived from message direction (from_me).
 // =============================================================
 const store = require('./store')
+const aiReport = require('./aiReport')
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0)
@@ -37,7 +38,7 @@ function shell(inner, title) {
 }
 
 // ids: undefined/null = all sessions; [] = no access; [..] = scoped
-async function generateReport({ ids, days = null, generatedAt = Date.now() } = {}) {
+async function generateReport({ ids, days = null, ai = false, generatedAt = Date.now() } = {}) {
   const scoped = Array.isArray(ids)
   const genOn = fmtDateTime(generatedAt)
   const title = "D'Decor — WhatsApp Activity Report"
@@ -93,7 +94,19 @@ async function generateReport({ ids, days = null, generatedAt = Date.now() } = {
 
   const awaiting = lastMsgs.filter((m) => !m.from_me).sort((a, b) => Number(b.ts) - Number(a.ts))
 
-  h += `<div class="note"><strong>About this report.</strong> Auto-generated from Sonar's captured WhatsApp data. <em>Team vs Dealer</em> is derived from message direction (the monitored account's outgoing = team; incoming = dealer). Tables are exact; qualitative issue analysis (escalations, quotes) is not auto-generated here.</div><hr>
+  h += `<div class="note"><strong>About this report.</strong> Auto-generated from Sonar's captured WhatsApp data. <em>Team vs Dealer</em> is derived from message direction (the monitored account's outgoing = team; incoming = dealer). The metric tables are exact.</div>`
+
+  // Optional AI narrative sections (executive summary, escalations, quality, actions)
+  if (ai) {
+    try {
+      const a = await aiReport.analyze({ ids, days, generatedAt })
+      h += '<hr>' + a.html
+    } catch (e) {
+      h += `<div class="crit"><strong>AI analysis unavailable.</strong> ${esc(e.message)}</div>`
+    }
+  }
+
+  h += `<hr>
 
 <h2>1. Session Activity Snapshot</h2>
 <table><tr><th>Session</th><th class="num">Chats</th><th class="num">Msgs</th><th>Team / Dealer</th><th>Busiest chats</th></tr>

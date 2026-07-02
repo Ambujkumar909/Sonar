@@ -218,15 +218,18 @@ function renderFeed() {
 /* ---------- REPORTS ---------- */
 function renderReports() {
   const frame = $('#reportFrame'); if (!frame) return
-  const daysSel = $('#reportDays'), dl = $('#reportDownload')
+  const daysSel = $('#reportDays'), dl = $('#reportDownload'), aiBtn = $('#reportAi'), status = $('#reportStatus')
   const win = () => { const d = daysSel && daysSel.value; return d && d !== 'all' ? '&days=' + encodeURIComponent(d) : '' }
-  const load = () => {
-    frame.src = '/api/report?t=' + Date.now() + win()          // cache-bust so it re-runs
-    if (dl) dl.href = '/api/report?download=1' + win()          // keep download in sync with the window
+  const load = (ai) => {
+    if (status) status.textContent = ai ? '⏳ Generating AI analysis… this can take up to a minute.' : ''
+    frame.src = '/api/report?t=' + Date.now() + win() + (ai ? '&ai=1' : '')     // cache-bust so it re-runs
+    if (dl) dl.href = '/api/report?download=1' + win() + (ai ? '&ai=1' : '')     // download matches the current view
   }
-  load()
-  if (daysSel) daysSel.onchange = load
-  const btn = $('#reportRefresh'); if (btn) btn.onclick = load
+  frame.onload = () => { if (status) status.textContent = '' }
+  load(false)
+  if (daysSel) daysSel.onchange = () => load(false)
+  const rb = $('#reportRefresh'); if (rb) rb.onclick = () => load(false)
+  if (aiBtn) { aiBtn.style.display = isAdminish() ? '' : 'none'; aiBtn.onclick = () => load(true) }
 }
 
 /* ---------- SESSIONS ---------- */
