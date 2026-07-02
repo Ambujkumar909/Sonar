@@ -16,6 +16,7 @@ function safeFileName(name) {
 function formatTime(tsSeconds) {
   const d = new Date(Number(tsSeconds) * 1000)
   return d.toLocaleString(LOCALE, {
+    timeZone: 'Asia/Kolkata',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',

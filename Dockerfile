@@ -10,6 +10,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 # app source
 COPY src ./src
 COPY public ./public
+COPY scripts ./scripts
 COPY automate.js ./automate.js
 
 ENV NODE_ENV=production
