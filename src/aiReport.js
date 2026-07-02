@@ -112,7 +112,7 @@ async function analyze({ ids, days = null, generatedAt = Date.now() } = {}) {
   for (const m of rows) {
     if (m.chat_name !== lastChat) { transcript += `\n\n### ${m.chat_name || 'Unknown chat'}\n`; lastChat = m.chat_name }
     const who = m.from_me ? 'TEAM' : `dealer(${m.sender_name || '?'})`
-    const line = `[${new Date(Number(m.ts)).toISOString().slice(0, 16).replace('T', ' ')}] ${who}: ${String(m.text).replace(/\s+/g, ' ').trim()}\n`
+    const line = `[${new Date(Number(m.ts)).toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).slice(0, 16)} IST] ${who}: ${String(m.text).replace(/\s+/g, ' ').trim()}\n`
     if (transcript.length + line.length > MAX_TRANSCRIPT_CHARS) { truncated = true; break }
     transcript += line
   }

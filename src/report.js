@@ -10,7 +10,7 @@ const aiReport = require('./aiReport')
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0)
 const clip = (s, n = 90) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s }
-const IN = (opts) => (ms) => (ms ? new Date(Number(ms)).toLocaleString('en-IN', opts) : '—')
+const IN = (opts) => (ms) => (ms ? new Date(Number(ms)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...opts }) : '—')
 const fmtDateTime = IN({ day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 const fmtDate = IN({ day: '2-digit', month: 'short', year: 'numeric' })
 

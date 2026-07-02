@@ -19,8 +19,8 @@ async function loadPendingGroups() {
     if (r && r.ok) state.newGroups = r.groups.map(g => ({ sessionId: g.session_id, jid: g.jid, subject: g.subject, participants: g.participants, ts: g.ts }))
   } catch {}
 }
-const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
-const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
+const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
 const initials = (s) => (s || '?').replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '#'
 const esc = (s) => (s ?? '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
@@ -349,13 +349,11 @@ const senderColor = (name) => {
   let h = 0; for (const c of (name || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0
   return `hsl(${SENDER_HUES[h % SENDER_HUES.length]} 55% var(--name-l, 42%))`
 }
-const dayKey = (ts) => new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const dayKey = (ts) => new Date(ts).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })
 const dayLabel = (ts) => {
-  const d = new Date(ts), now = new Date()
-  const same = (a, b) => a.toDateString() === b.toDateString()
-  if (same(d, now)) return 'Today'
-  const y = new Date(now); y.setDate(now.getDate() - 1)
-  if (same(d, y)) return 'Yesterday'
+  const now = Date.now() // compare IST calendar days (dayKey is Asia/Kolkata)
+  if (dayKey(ts) === dayKey(now)) return 'Today'
+  if (dayKey(ts) === dayKey(now - 86400000)) return 'Yesterday'
   return dayKey(ts)
 }
 

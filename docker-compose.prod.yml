@@ -11,6 +11,8 @@ services:
     container_name: sonar
     restart: unless-stopped
     env_file: .env
+    environment:
+      - TZ=Asia/Kolkata              # server-side timestamps in IST (report formatters also pin IST explicitly)
     expose:
       - "4545"                       # reachable only on shared_proxy, via nginx_proxy
     volumes:
