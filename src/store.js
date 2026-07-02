@@ -88,6 +88,10 @@ async function init() {
     session_id TEXT, id TEXT, value TEXT, PRIMARY KEY(session_id, id)
   );
   CREATE TABLE IF NOT EXISTS kv ( k TEXT PRIMARY KEY, v TEXT );
+  CREATE TABLE IF NOT EXISTS reports (
+    id BIGSERIAL PRIMARY KEY, created_at BIGINT, created_by TEXT,
+    window_days INT DEFAULT 0, msg_count INT DEFAULT 0, chat_count INT DEFAULT 0, html TEXT
+  );
   `)
 }
 
@@ -289,6 +293,14 @@ module.exports = {
       users: await n(`SELECT COUNT(*) n FROM users`),
     }
   },
+
+  // ---- saved AI reports (stored snapshots — generate once, reuse) ----
+  saveReport: async (r) => (await one(`INSERT INTO reports (created_at,created_by,window_days,msg_count,chat_count,html)
+      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [Date.now(), r.created_by || '', r.window_days || 0, r.msg_count || 0, r.chat_count || 0, r.html])).id,
+  listReports: (limit = 100) => all(`SELECT id, created_at, created_by, window_days, msg_count, chat_count FROM reports ORDER BY id DESC LIMIT $1`, [limit]),
+  getReport: (id) => one(`SELECT * FROM reports WHERE id=$1`, [id]),
+  deleteReport: (id) => q(`DELETE FROM reports WHERE id=$1`, [id]),
 
   // ---- key/value (license cache etc.) ----
   kvGet: async (k) => { const r = await one(`SELECT v FROM kv WHERE k=$1`, [k]); return r ? r.v : null },

@@ -216,21 +216,18 @@ function renderFeed() {
 }
 
 /* ---------- REPORTS ---------- */
-function renderReports() {
+async function renderReports() {
   const frame = $('#reportFrame'); if (!frame) return
-  const daysSel = $('#reportDays'), dl = $('#reportDownload'), aiBtn = $('#reportAi'), status = $('#reportStatus')
+  const daysSel = $('#reportDays'), dl = $('#reportDownload'), aiBtn = $('#reportAi'), metricsBtn = $('#reportMetrics'), status = $('#reportStatus')
+  const admin = isAdminish()
   const win = () => { const d = daysSel && daysSel.value; return d && d !== 'all' ? '&days=' + encodeURIComponent(d) : '' }
-  const load = (ai) => {
-    if (status) status.textContent = ai ? '⏳ Generating AI analysis… this can take up to a minute.' : ''
-    frame.src = '/api/report?t=' + Date.now() + win() + (ai ? '&ai=1' : '')     // cache-bust so it re-runs
-    if (dl) dl.href = '/api/report?download=1' + win() + (ai ? '&ai=1' : '')     // fallback only (see onclick)
-  }
-  frame.onload = () => { if (status) status.textContent = '' }
-  // Download the report that's ALREADY rendered in the iframe (same-origin) —
-  // don't re-hit the server, which would re-run the (slow, paid) AI pass.
+  const viewMetrics = () => { if (status) status.textContent = ''; frame.src = '/api/report?t=' + Date.now() + win() }
+
+  frame.onload = () => { if (status && status.dataset.busy !== '1') status.textContent = '' }
+  // Download whatever is CURRENTLY in the iframe (same-origin) — never re-run the server/AI.
   if (dl) dl.onclick = (e) => {
     const doc = frame.contentDocument
-    if (!doc || !doc.documentElement) return // not loaded yet → let href fallback handle it
+    if (!doc || !doc.documentElement) return
     e.preventDefault()
     const html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
@@ -239,10 +236,48 @@ function renderReports() {
     document.body.appendChild(a); a.click(); a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 2000)
   }
-  load(false)
-  if (daysSel) daysSel.onchange = () => load(false)
-  const rb = $('#reportRefresh'); if (rb) rb.onclick = () => load(false)
-  if (aiBtn) { aiBtn.style.display = isAdminish() ? '' : 'none'; aiBtn.onclick = () => load(true) }
+  if (metricsBtn) metricsBtn.onclick = viewMetrics
+  if (daysSel) daysSel.onchange = viewMetrics
+
+  const savedCard = $('#savedReportsCard'); if (savedCard) savedCard.style.display = admin ? '' : 'none'
+  if (aiBtn) {
+    aiBtn.style.display = admin ? '' : 'none'
+    aiBtn.onclick = async () => {
+      status.dataset.busy = '1'; status.textContent = '⏳ Generating AI report… this can take up to a minute.'; aiBtn.disabled = true
+      try {
+        const r = await post('/reports?days=' + encodeURIComponent(daysSel.value || 'all'), {})
+        status.dataset.busy = ''
+        if (r && r.ok && r.id) { status.textContent = ''; await loadSavedReports(); frame.src = '/api/reports/' + r.id + '?t=' + Date.now(); toast('AI report generated & saved') }
+        else { status.textContent = ''; toast((r && r.error) || 'Generation failed', 'err') }
+      } catch { status.dataset.busy = ''; status.textContent = ''; toast('Generation failed', 'err') }
+      finally { aiBtn.disabled = false }
+    }
+  }
+  if (admin) await loadSavedReports()
+  viewMetrics() // default view
+}
+async function loadSavedReports() {
+  const el = $('#savedReportsTable'); if (!el) return
+  const r = await api('/reports'); if (!r || !r.ok) return
+  const rows = r.reports || []
+  el.innerHTML = `<thead><tr><th>Generated</th><th>Window</th><th>Msgs</th><th>By</th><th></th></tr></thead><tbody>${
+    rows.length ? rows.map(x => `<tr>
+      <td style="white-space:nowrap">${fmtTime(x.created_at)}</td>
+      <td>${x.window_days ? 'Last ' + x.window_days + 'd' : 'All'}</td>
+      <td>${x.msg_count}</td>
+      <td>${esc(x.created_by || '')}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn" data-act="viewreport" data-id="${x.id}">View</button>
+        <a class="btn" href="/api/reports/${x.id}?download=1">⬇</a>
+        <button class="btn danger" data-act="delreport" data-id="${x.id}">🗑</button>
+      </td></tr>`).join('') : '<tr><td colspan="5"><div class="empty">No AI reports yet — click "Generate AI report".</div></td></tr>'}</tbody>`
+}
+window.viewReport = (id) => { const f = $('#reportFrame'); if (f) f.src = '/api/reports/' + id + '?t=' + Date.now() }
+window.delReport = async (id) => {
+  if (!confirm('Delete this saved report?')) return
+  const r = await del('/reports/' + id)
+  if (r && r.ok === false) return toast(r.error || 'Could not delete', 'err')
+  toast('Report deleted'); loadSavedReports()
 }
 
 /* ---------- SESSIONS ---------- */
@@ -764,6 +799,8 @@ document.addEventListener('click', (e) => {
     case 'delgrant': delGrant(a.id); break
     case 'addgroupwatch': addGroupWatch(a.sid, a.jid); break
     case 'dismissgroup': dismissNewGroup(a.sid, a.jid); break
+    case 'viewreport': viewReport(a.id); break
+    case 'delreport': delReport(a.id); break
     case 'sortwatch': {
       const s = state.watchSort
       state.watchSort = (s && s.key === a.key) ? { key: a.key, dir: -s.dir } : { key: a.key, dir: 1 }

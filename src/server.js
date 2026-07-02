@@ -250,6 +250,28 @@ app.get('/api/report', wrap(async (req, res) => {
   res.type('html').send(html)
 }))
 
+// ---- saved AI reports (generate once, store, reuse — no repeat API spend) ----
+// Generate an AI report and STORE it. Admin-only (it spends API tokens).
+app.post('/api/reports', auth.requireUserAdmin, wrap(async (req, res) => {
+  const ids = await idsFor(req)
+  const days = reportDays(req.query.days)
+  const { html, stats } = await report.generateReport({ ids, days, ai: true })
+  const id = await store.saveReport({ created_by: req.user.username, window_days: days || 0, msg_count: stats.messages, chat_count: stats.chats, html })
+  auth.audit(req, 'report.ai.generate', String(id))
+  ok(res, { id })
+}))
+app.get('/api/reports', auth.requireUserAdmin, wrap(async (req, res) => ok(res, { reports: await store.listReports() })))
+app.get('/api/reports/:id', auth.requireUserAdmin, wrap(async (req, res) => {
+  const r = await store.getReport(Number(req.params.id))
+  if (!r) return res.status(404).type('html').send('<p>Report not found.</p>')
+  if (req.query.download) {
+    res.setHeader('Content-Disposition', `attachment; filename="whatsapp-report-${new Date(Number(r.created_at)).toISOString().slice(0, 10)}.html"`)
+    auth.audit(req, 'report.download', String(r.id))
+  }
+  res.type('html').send(r.html)
+}))
+app.delete('/api/reports/:id', auth.requireUserAdmin, wrap(async (req, res) => { await store.deleteReport(Number(req.params.id)); auth.audit(req, 'report.delete', req.params.id); ok(res, {}) }))
+
 // ---- analytics & events ----------------------------------------------------
 app.get('/api/stats', wrap(async (req, res) => ok(res, { stats: await store.stats(await idsFor(req)) })))
 app.get('/api/analytics', wrap(async (req, res) => {
