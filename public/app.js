@@ -223,9 +223,22 @@ function renderReports() {
   const load = (ai) => {
     if (status) status.textContent = ai ? '⏳ Generating AI analysis… this can take up to a minute.' : ''
     frame.src = '/api/report?t=' + Date.now() + win() + (ai ? '&ai=1' : '')     // cache-bust so it re-runs
-    if (dl) dl.href = '/api/report?download=1' + win() + (ai ? '&ai=1' : '')     // download matches the current view
+    if (dl) dl.href = '/api/report?download=1' + win() + (ai ? '&ai=1' : '')     // fallback only (see onclick)
   }
   frame.onload = () => { if (status) status.textContent = '' }
+  // Download the report that's ALREADY rendered in the iframe (same-origin) —
+  // don't re-hit the server, which would re-run the (slow, paid) AI pass.
+  if (dl) dl.onclick = (e) => {
+    const doc = frame.contentDocument
+    if (!doc || !doc.documentElement) return // not loaded yet → let href fallback handle it
+    e.preventDefault()
+    const html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+    const a = document.createElement('a')
+    a.href = url; a.download = 'whatsapp-report-' + new Date().toISOString().slice(0, 10) + '.html'
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  }
   load(false)
   if (daysSel) daysSel.onchange = () => load(false)
   const rb = $('#reportRefresh'); if (rb) rb.onclick = () => load(false)
