@@ -8,6 +8,7 @@ license-server
 docs
 tests
 scripts
+!scripts/export-chats.js
 *.pdf
 license-keys.txt
 ADMIN_CREDENTIALS.txt

@@ -18,7 +18,8 @@
     <div class="readonly-badge"><span class="dot"></span> Observe-only · never sends</div>
 
     <nav class="nav" id="nav">
-      <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard</button>
+      <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
+      <button data-view="reports"><span class="ico">📊</span> Reports</button>
       <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
       <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
       <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
@@ -60,6 +61,7 @@
         <div class="card">
           <h3>Messages · last 24 hours</h3>
           <div class="bars" id="hourlyBars"></div>
+          <div class="bar-axis" id="hourlyAxis"></div>
         </div>
         <div class="card">
           <h3>Most active chats</h3>
@@ -69,6 +71,37 @@
       <div class="card" style="margin-top:18px">
         <h3>Live feed</h3>
         <div class="feed" id="liveFeed"><div class="empty">Waiting for incoming messages…</div></div>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="view-reports" class="view hide">
+      <div class="card" style="margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <h3 style="margin:0">WhatsApp Activity Report</h3>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="in" id="reportDays" style="padding:8px 10px">
+              <option value="2">Last 2 days</option>
+              <option value="3">Last 3 days</option>
+              <option value="5">Last 5 days</option>
+              <option value="7" selected>Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="all">All captured</option>
+            </select>
+            <button class="btn" id="reportMetrics">📊 View metrics</button>
+            <a class="btn" id="reportDownload" href="#">⬇ Download chat data</a>
+            <button class="btn primary" id="reportAi" style="display:none">✨ Generate AI report</button>
+          </div>
+        </div>
+        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-soft)"><b>View metrics</b> is free and live. <b>⬇ Download chat data</b> saves the raw chat transcripts for the selected window (for offline analysis in Claude Code — no API cost). <b>✨ Generate AI report</b> confirms first, runs the Claude analysis once, and saves it under <b>Saved AI reports</b> below — open/download it there without regenerating. <span id="reportStatus" style="color:var(--warn);font-weight:700"></span></p>
+      </div>
+      <div class="card admin-only" id="savedReportsCard" style="margin-bottom:18px">
+        <h3>Saved AI reports</h3>
+        <div class="tablewrap"><table id="savedReportsTable"></table></div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <iframe id="reportFrame" title="WhatsApp Activity Report" style="width:100%;height:calc(100vh - 280px);min-height:420px;border:0;background:#fff;border-radius:14px;display:block"></iframe>
       </div>
     </section>
 

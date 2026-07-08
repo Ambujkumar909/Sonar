@@ -10,10 +10,17 @@ const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Typ
 const del = (path) => api(path, { method: 'DELETE' })
 
 const state = { sessions: [], stats: {}, view: 'dashboard', chatSession: null, chatJid: null, feed: [], newGroups: [] }
-try { state.newGroups = JSON.parse(localStorage.getItem('sonar.newGroups') || '[]') } catch { state.newGroups = [] }
-const saveNewGroups = () => { try { localStorage.setItem('sonar.newGroups', JSON.stringify(state.newGroups)) } catch {} }
-const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
-const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+// Pending new-group alerts are persisted server-side (admin-visible across machines),
+// so any admin sees a group joined while their dashboard was closed.
+async function loadPendingGroups() {
+  if (!isAdminish()) { state.newGroups = []; return }
+  try {
+    const r = await api('/pending-groups')
+    if (r && r.ok) state.newGroups = r.groups.map(g => ({ sessionId: g.session_id, jid: g.jid, subject: g.subject, participants: g.participants, ts: g.ts }))
+  } catch {}
+}
+const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
+const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
 const initials = (s) => (s || '?').replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '#'
 const esc = (s) => (s ?? '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
@@ -27,7 +34,7 @@ const urlTheme = new URLSearchParams(location.search).get('theme')
 applyTheme(urlTheme || localStorage.getItem('sonar-theme') || 'light')
 
 /* ---------- navigation ---------- */
-const TITLES = { dashboard: 'Dashboard', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
+const TITLES = { dashboard: 'Dashboard', reports: 'Reports', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
 function go(view) {
   if (!TITLES[view]) view = 'dashboard'
   // route guards (defence in depth — API enforces too)
@@ -86,11 +93,12 @@ function initSocket() {
   socket.on('alert', (a) => toast(`⚑ <b>${esc(a.keyword)}</b> in ${esc(a.chatName)}<br><span style="font-weight:500;color:var(--ink-soft)">${esc(a.text.slice(0, 90))}</span>`, 'alert'))
   socket.on('license', () => { refreshLicenseBanner(); if (state.view === 'license') render('license') })
   socket.on('newgroup', (g) => {
+    if (!isAdminish()) return // pending-group alerts are an admin concern
     if (state.newGroups.some(x => x.jid === g.jid && x.sessionId === g.sessionId)) return
-    state.newGroups.unshift(g); saveNewGroups()
+    state.newGroups.unshift(g)
     const sname = (state.sessions.find(s => s.id === g.sessionId) || {}).name || 'a session'
     toast(`👥 New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to add it to your watchlist.</span>`, 'alert')
-    renderNewGroupBanner()
+    renderNewGroupBanner(); updateNewGroupBadge()
   })
 }
 
@@ -110,7 +118,7 @@ function refreshChrome() {
    RENDER ROUTER
    ============================================================= */
 function render(view) {
-  ({ dashboard: renderDashboard, sessions: renderSessions, chats: renderChats,
+  ({ dashboard: renderDashboard, reports: renderReports, sessions: renderSessions, chats: renderChats,
      watchlist: renderWatchlist, keywords: renderKeywords, health: renderHealth,
      audit: renderAudit, license: renderLicense, users: renderUsers, files: renderFiles, about: renderAbout }[view] || (() => {}))()
   requestAnimationFrame(() => stagger($('#view-' + view)))
@@ -161,15 +169,30 @@ async function renderDashboard() {
   const max = Math.max(1, ...a.hourly.map(h => h.n))
   const byBucket = Object.fromEntries(a.hourly.map(h => [h.bucket, h.n]))
   const nowB = Math.floor(Date.now() / 3600000)
-  let bars = ''
-  for (let i = 23; i >= 0; i--) { const n = byBucket[nowB - i] || 0; bars += `<div class="bar" style="height:${(n / max) * 100}%" title="${n} msgs"></div>` }
+  const fmtHr = (h) => { let hh = h % 12; if (hh === 0) hh = 12; return hh + (h < 12 ? 'am' : 'pm') } // 12am · 6am · 12pm · 6pm
+  let bars = '', axis = ''
+  for (let i = 23; i >= 0; i--) {
+    const b = nowB - i, n = byBucket[b] || 0
+    const hour = new Date(b * 3600000).getHours()
+    bars += `<div class="bar" style="height:${(n / max) * 100}%" title="${fmtHr(hour)} · ${n} msg${n === 1 ? '' : 's'}"></div>`
+    axis += `<span>${hour % 6 === 0 ? fmtHr(hour) : ''}</span>` // label every 6h
+  }
   $('#hourlyBars').innerHTML = bars
+  $('#hourlyAxis').innerHTML = axis
 
   $('#topChats').innerHTML = a.topChats.length ? a.topChats.map(c => `
-    <div class="topchat"><span class="tc-name">${esc(c.chat_name || '—')}</span><span class="tc-n">${c.n} msgs</span></div>
+    <div class="topchat" data-act="opentop" data-sid="${esc(c.session_id)}" data-jid="${esc(c.chat_jid)}" title="Open in Recent Chats">
+      <span class="tc-name">${esc(c.chat_name || '—')}</span><span class="tc-n">${c.n} msgs</span></div>
   `).join('') : '<div class="empty">No messages yet.</div>'
   renderFeed()
-  renderNewGroupBanner()
+  await loadPendingGroups()
+  renderNewGroupBanner(); updateNewGroupBadge()
+}
+function updateNewGroupBadge() {
+  const b = $('#navNewGroups'); if (!b) return
+  const n = state.newGroups.length
+  b.textContent = n
+  b.classList.toggle('hide', n === 0)
 }
 function renderNewGroupBanner() {
   const el = $('#newGroupBanner'); if (!el) return
@@ -190,6 +213,61 @@ function renderFeed() {
   el.innerHTML = state.feed.map(m => `
     <div class="f"><div class="top"><span class="ch">${esc(m.chat_name)} ${m.is_group ? '<span class="gtag">group</span>' : ''}</span><span class="tm" style="font-size:11px;color:var(--ink-faint)">${fmtClock(m.ts)}</span></div>
     <div class="tx"><span class="sn">${esc(m.sender_name)}:</span> ${esc(m.text)}</div></div>`).join('')
+}
+
+/* ---------- REPORTS ---------- */
+async function renderReports() {
+  const frame = $('#reportFrame'); if (!frame) return
+  const daysSel = $('#reportDays'), dl = $('#reportDownload'), aiBtn = $('#reportAi'), metricsBtn = $('#reportMetrics'), status = $('#reportStatus')
+  const admin = isAdminish()
+  const win = () => { const d = daysSel && daysSel.value; return d && d !== 'all' ? '&days=' + encodeURIComponent(d) : '' }
+  const syncDownload = () => { if (dl) dl.href = '/api/report/chats?download=1' + win() } // top download = raw chat data (no API)
+  const viewMetrics = () => { if (status) status.textContent = ''; frame.src = '/api/report?t=' + Date.now() + win(); syncDownload() }
+
+  frame.onload = () => { if (status && status.dataset.busy !== '1') status.textContent = '' }
+  if (metricsBtn) metricsBtn.onclick = viewMetrics
+  if (daysSel) daysSel.onchange = viewMetrics
+
+  const savedCard = $('#savedReportsCard'); if (savedCard) savedCard.style.display = admin ? '' : 'none'
+  if (aiBtn) {
+    aiBtn.style.display = admin ? '' : 'none'
+    aiBtn.onclick = async () => {
+      if (!confirm('Generate an AI report now?\n\nThis calls the Claude API and incurs cost. The result is saved under "Saved AI reports" below, where you can open or download it anytime without regenerating.')) return
+      status.dataset.busy = '1'; status.textContent = '⏳ Generating AI report… this can take up to a minute.'; aiBtn.disabled = true
+      try {
+        const r = await post('/reports?days=' + encodeURIComponent(daysSel.value || 'all'), {})
+        status.dataset.busy = ''
+        if (r && r.ok && r.id) { status.textContent = ''; await loadSavedReports(); frame.src = '/api/reports/' + r.id + '?t=' + Date.now(); toast('AI report generated & saved') }
+        else { status.textContent = ''; toast((r && r.error) || 'Generation failed', 'err') }
+      } catch { status.dataset.busy = ''; status.textContent = ''; toast('Generation failed', 'err') }
+      finally { aiBtn.disabled = false }
+    }
+  }
+  if (admin) await loadSavedReports()
+  viewMetrics() // default view
+}
+async function loadSavedReports() {
+  const el = $('#savedReportsTable'); if (!el) return
+  const r = await api('/reports'); if (!r || !r.ok) return
+  const rows = r.reports || []
+  el.innerHTML = `<thead><tr><th>Generated</th><th>Window</th><th>Msgs</th><th>By</th><th></th></tr></thead><tbody>${
+    rows.length ? rows.map(x => `<tr>
+      <td style="white-space:nowrap">${fmtTime(x.created_at)}</td>
+      <td>${x.window_days ? 'Last ' + x.window_days + 'd' : 'All'}</td>
+      <td>${x.msg_count}</td>
+      <td>${esc(x.created_by || '')}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn" data-act="viewreport" data-id="${x.id}">View</button>
+        <a class="btn" href="/api/reports/${x.id}?download=1">⬇</a>
+        <button class="btn danger" data-act="delreport" data-id="${x.id}">🗑</button>
+      </td></tr>`).join('') : '<tr><td colspan="5"><div class="empty">No AI reports yet — click "Generate AI report".</div></td></tr>'}</tbody>`
+}
+window.viewReport = (id) => { const f = $('#reportFrame'); if (f) f.src = '/api/reports/' + id + '?t=' + Date.now() }
+window.delReport = async (id) => {
+  if (!confirm('Delete this saved report?')) return
+  const r = await del('/reports/' + id)
+  if (r && r.ok === false) return toast(r.error || 'Could not delete', 'err')
+  toast('Report deleted'); loadSavedReports()
 }
 
 /* ---------- SESSIONS ---------- */
@@ -261,20 +339,23 @@ const senderColor = (name) => {
   let h = 0; for (const c of (name || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0
   return `hsl(${SENDER_HUES[h % SENDER_HUES.length]} 55% var(--name-l, 42%))`
 }
-const dayKey = (ts) => new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+const dayKey = (ts) => new Date(ts).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })
 const dayLabel = (ts) => {
-  const d = new Date(ts), now = new Date()
-  const same = (a, b) => a.toDateString() === b.toDateString()
-  if (same(d, now)) return 'Today'
-  const y = new Date(now); y.setDate(now.getDate() - 1)
-  if (same(d, y)) return 'Yesterday'
+  const now = Date.now() // compare IST calendar days (dayKey is Asia/Kolkata)
+  if (dayKey(ts) === dayKey(now)) return 'Today'
+  if (dayKey(ts) === dayKey(now - 86400000)) return 'Yesterday'
   return dayKey(ts)
 }
 
 async function renderChats() {
-  const sel = $('#chatSession'); fillSessionSelect(sel, state.chatSession)
-  state.chatSession = sel.value || (state.sessions[0] && state.sessions[0].id)
+  // A dashboard "most active chats" click asks us to jump straight into a chat.
+  const pending = state.pendingOpenChat; state.pendingOpenChat = null
+  const sel = $('#chatSession')
+  fillSessionSelect(sel, pending ? pending.sid : state.chatSession)
+  // pending.sid is authoritative — don't let the dropdown reset clobber it
+  state.chatSession = (pending && pending.sid) || sel.value || (state.sessions[0] && state.sessions[0].id)
   sel.value = state.chatSession || ''
+  if (pending) state.chatJid = pending.jid
   state.chatSeg = state.chatSeg || 'all'
   state.chatScope = state.chatScope || 'active'
   sel.onchange = () => { state.chatSession = sel.value; state.chatJid = null; loadChatList() }
@@ -288,6 +369,7 @@ async function renderChats() {
     b.onclick = () => { state.chatScope = b.dataset.scope; $$('#chatScope .seg').forEach(x => x.classList.toggle('active', x === b)); state.chatJid = null; loadChatList() }
   })
   await loadChatList()
+  if (pending && state.chatJid) await loadMessages() // open the conversation the dashboard asked for
 }
 async function loadChatList() {
   if (!state.chatSession) { $('#chatList').innerHTML = '<div class="empty">No session granted.</div>'; return }
@@ -325,10 +407,12 @@ async function loadMessages() {
   const exportBase = `/api/export/${state.chatSession}?jid=${encodeURIComponent(state.chatJid)}`
   $('#chatHead').innerHTML = `
     <div class="chat-hero">
-      <div class="hav">${initials(name)}</div>
-      <div style="min-width:0">
-        <div class="hname">${esc(name)}</div>
-        <div class="hmeta">${isGroup ? 'Group' : 'Direct'} · ${messages.length} messages · read-only</div>
+      <div class="ch-id">
+        <div class="hav">${initials(name)}</div>
+        <div style="min-width:0">
+          <div class="hname">${esc(name)}</div>
+          <div class="hmeta">${isGroup ? 'Group' : 'Direct'} · ${messages.length} messages · read-only</div>
+        </div>
       </div>
       <div class="hactions">
         <a class="btn" href="${exportBase}&fmt=txt">⬇ Export .txt</a>
@@ -354,20 +438,82 @@ async function loadMessages() {
 }
 
 /* ---------- WATCHLIST ---------- */
+const normGroup = (s) => (s || '').trim().toLowerCase()
+// Looser key (drops case, spacing AND punctuation) — used only to self-heal a
+// hand-typed entry against the authoritative name picked from the dropdown.
+const looseGroup = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+function drawWatchTable(watch, nameById, sizeMap) {
+  state.watchRender = { watch, nameById, sizeMap } // cache so header clicks re-sort without refetching
+  const memVal = (w) => {
+    if (w.kind !== 'group') return null
+    const live = sizeMap[w.session_id] && sizeMap[w.session_id][normGroup(w.value)]
+    if (live != null) return live                 // freshest: live group size
+    return (w.members != null ? w.members : null) // stored fallback
+  }
+  const memCell = (w) => { const v = memVal(w); return v != null ? v : '—' }
+  const s = state.watchSort
+  const rows = watch.slice()
+  if (s && s.key === 'value') {
+    rows.sort((a, b) => s.dir * String(a.value || '').localeCompare(String(b.value || ''), undefined, { sensitivity: 'base' }))
+  } else if (s && s.key === 'members') {
+    rows.sort((a, b) => {
+      const av = memVal(a), bv = memVal(b)
+      if (av == null && bv == null) return 0
+      if (av == null) return 1   // unknown / non-group rows always sink to the bottom
+      if (bv == null) return -1
+      return s.dir * (av - bv)
+    })
+  }
+  const ind = (key) => (s && s.key === key) ? (s.dir > 0 ? ' ▲' : ' ▼') : ''
+  $('#watchTable').innerHTML =
+    `<thead><tr><th>Session</th><th>Type</th>`
+    + `<th class="th-sort" data-act="sortwatch" data-key="value">Value${ind('value')}</th>`
+    + `<th class="th-sort" data-act="sortwatch" data-key="members">Members${ind('members')}</th>`
+    + `<th></th></tr></thead><tbody>${
+    rows.length ? rows.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td>${memCell(w)}</td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
+    : '<tr><td colspan="5"><div class="empty">Watchlist empty — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
+}
 async function renderWatchlist() {
   fillSessionSelect($('#watchSession'))
   const { watch } = await api('/watch')
   const nameById = Object.fromEntries(state.sessions.map(s => [s.id, s.name]))
-  $('#watchTable').innerHTML = `<thead><tr><th>Session</th><th>Type</th><th>Value</th><th></th></tr></thead><tbody>${
-    watch.length ? watch.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
-    : '<tr><td colspan="4"><div class="empty">Watchlist empty — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
+  drawWatchTable(watch, nameById, {}) // render now with stored counts
+  // Then enrich (best-effort) with live group sizes — also refreshes the stored
+  // `groups` table server-side, so the count appears even if it was never synced.
+  const sids = [...new Set(watch.filter(w => w.kind === 'group' && w.session_id && w.session_id !== '*').map(w => w.session_id))]
+  if (!sids.length) return
+  const sizeMap = {}
+  await Promise.all(sids.map(async sid => {
+    try {
+      const r = await api(`/sessions/${sid}/groups/live`)
+      if (r && r.ok) { const m = {}; r.groups.forEach(g => { m[normGroup(g.subject)] = g.participants }); sizeMap[sid] = m }
+    } catch {}
+  }))
+  if (state.view === 'watchlist' && Object.keys(sizeMap).length) drawWatchTable(watch, nameById, sizeMap)
 }
 window.delWatch = async (id) => { await del('/watch/' + id); toast('Removed'); renderWatchlist() }
 $('#addWatchBtn').onclick = async () => {
   const sid = $('#watchSession').value, kind = $('#watchKind').value, value = $('#watchValue').value.trim()
   if (!sid || !value) return toast('Enter a value')
-  await post('/watch', { sid, kind, value }); $('#watchValue').value = ''; toast('Added to watchlist'); renderWatchlist()
+  if (kind === 'group') {
+    const wr = await api('/watch?sid=' + encodeURIComponent(sid))
+    const existing = (wr.ok ? wr.watch : []).filter(w => w.kind === 'group' && w.session_id === sid)
+    // Only self-heal when the value is the authoritative one picked from the dropdown.
+    if (state.watchPicked === value) {
+      const dupes = existing.filter(w => w.value !== value && looseGroup(w.value) === looseGroup(value))
+      for (const d of dupes) { try { await del('/watch/' + d.id) } catch {} }
+      if (dupes.length) toast(`Corrected ${dupes.length} typed entr${dupes.length > 1 ? 'ies' : 'y'} to the exact group name`)
+    }
+    if (existing.some(w => w.value === value)) {
+      state.watchPicked = null; $('#watchValue').value = ''; renderWatchlist()
+      return toast('Already on the watchlist')
+    }
+  }
+  const r = await post('/watch', { sid, kind, value })
+  if (r && r.ok === false) return toast(r.error || 'Could not add', 'err')
+  state.watchPicked = null; $('#watchValue').value = ''; toast('Added to watchlist'); renderWatchlist()
 }
+$('#watchValue').oninput = () => { state.watchPicked = null } // manual edit drops the authoritative pick
 $('#fetchGroupsBtn').onclick = async () => {
   const sid = $('#watchSession').value
   if (!sid) return toast('Pick a session first')
@@ -377,14 +523,28 @@ $('#fetchGroupsBtn').onclick = async () => {
     const r = await api(`/sessions/${sid}/groups/live`)
     if (!r.ok) return toast(r.error || 'Could not fetch groups', 'err')
     if (!r.groups.length) { sel.innerHTML = '<option value="">No groups found</option>'; return toast('No groups on this session') }
+    // Mark which groups are already on the watchlist. Match tolerantly (ignore
+    // case/spacing/punctuation) so a hand-typed entry like "D Decor…" still
+    // registers against the real "D'Decor…" group instead of misreading ⚠.
+    const wr = await api('/watch?sid=' + encodeURIComponent(sid))
+    const watchedKeys = new Set((wr.ok ? wr.watch : []).filter(w => w.kind === 'group').map(w => looseGroup(w.value)))
+    const rows = r.groups.map(g => ({ ...g, watched: watchedKeys.has(looseGroup(g.subject)) }))
+    // Unmonitored groups first (what you act on), then monitored; alphabetical within each.
+    rows.sort((a, b) => (a.watched - b.watched) || a.subject.localeCompare(b.subject))
+    const pending = rows.filter(g => !g.watched).length
     sel.innerHTML = '<option value="">— choose a group —</option>' +
-      r.groups.map(g => `<option value="${esc(g.subject)}">${esc(g.subject)} (${g.participants})</option>`).join('')
-    toast(`Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''}`)
+      rows.map(g => {
+        const mark = g.watched ? '✓' : '⚠'
+        const tail = g.watched ? '' : ' — not monitored'
+        return `<option value="${esc(g.subject)}">${mark} ${esc(g.subject)} (${g.participants})${tail}</option>`
+      }).join('')
+    toast(pending ? `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · ⚠ ${pending} not monitored` : `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · all monitored`)
   } finally { btn.disabled = false; btn.textContent = label }
 }
 $('#watchGroupSelect').onchange = (e) => {
   if (!e.target.value) return
   $('#watchKind').value = 'group'; $('#watchValue').value = e.target.value
+  state.watchPicked = e.target.value // authoritative name → enables self-heal on Add
 }
 
 /* ---------- KEYWORDS ---------- */
@@ -618,6 +778,7 @@ document.addEventListener('click', (e) => {
     case 'watchall': toggleWatchAll(a.id, a.val); break
     case 'delsess': removeSession(a.id, a.name); break
     case 'openchat': if (a.sid) state.chatSession = a.sid; openChat(a.jid); break
+    case 'opentop': state.pendingOpenChat = { sid: a.sid, jid: a.jid }; go('chats'); break
     case 'dellog': delLog(a.jid); break
     case 'delwatch': delWatch(a.id); break
     case 'delkw': delKeyword(a.id); break
@@ -626,11 +787,22 @@ document.addEventListener('click', (e) => {
     case 'delgrant': delGrant(a.id); break
     case 'addgroupwatch': addGroupWatch(a.sid, a.jid); break
     case 'dismissgroup': dismissNewGroup(a.sid, a.jid); break
+    case 'viewreport': viewReport(a.id); break
+    case 'delreport': delReport(a.id); break
+    case 'sortwatch': {
+      const s = state.watchSort
+      state.watchSort = (s && s.key === a.key) ? { key: a.key, dir: -s.dir } : { key: a.key, dir: 1 }
+      const r = state.watchRender
+      if (r) drawWatchTable(r.watch, r.nameById, r.sizeMap)
+      break
+    }
   }
 })
-function dropNewGroup(sid, jid) {
+async function dropNewGroup(sid, jid) {
   state.newGroups = state.newGroups.filter(g => !(g.jid === jid && g.sessionId === sid))
-  saveNewGroups(); renderNewGroupBanner()
+  renderNewGroupBanner(); updateNewGroupBadge()
+  // Clear it from the server queue so it stays dismissed for every admin.
+  try { await del(`/pending-groups?sid=${encodeURIComponent(sid)}&jid=${encodeURIComponent(jid)}`) } catch {}
 }
 window.dismissNewGroup = (sid, jid) => dropNewGroup(sid, jid)
 window.addGroupWatch = async (sid, jid) => {
@@ -687,6 +859,8 @@ function startApp(me) {
   refreshLicenseBanner()
   setInterval(() => { if (state.view === 'license') tickCountdown() }, 1000) // live countdown
   go(location.hash.slice(1) || 'dashboard')
+  // Surface pending new-group alerts from any landing view (admins only).
+  loadPendingGroups().then(updateNewGroupBadge)
 }
 
 /* ---------- global search ---------- */

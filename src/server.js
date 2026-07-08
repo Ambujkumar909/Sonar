@@ -18,6 +18,8 @@ const store = require('./store')
 const auth = require('./auth')
 const textlog = require('./textlog')
 const license = require('./license')
+const report = require('./report')
+const chatExport = require('./chatExport')
 const SessionManager = require('./sessionManager')
 
 const app = express()
@@ -58,8 +60,10 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 // ============================================================================
 app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const { username, password } = req.body || {}
+  const pw = String(password || '')
+  if (pw.length > auth.MAX_PASSWORD_LEN) return bad(res, 'Invalid username or password', 401) // reject oversized before any hashing
   const user = username && await store.getUserByName(String(username).trim())
-  if (!user || !auth.verifyPassword(String(password || ''), user.salt, user.pass_hash)) {
+  if (!user || !(await auth.verifyPassword(pw, user.salt, user.pass_hash))) {
     store.logAudit({ user_id: null, username: username || '?', action: 'login.fail', target: '', detail: '', ip: auth.ipOf(req), ts: Date.now() })
     return bad(res, 'Invalid username or password', 401)
   }
@@ -212,6 +216,14 @@ app.delete('/api/watch/:id', auth.requireWrite, wrap(async (req, res) => {
   await store.delWatch(Number(req.params.id)); auth.audit(req, 'watch.del', req.params.id); ok(res, {})
 }))
 
+// ---- pending new-group alerts (admin only) --------------------------------
+app.get('/api/pending-groups', auth.requireUserAdmin, wrap(async (req, res) => ok(res, { groups: await store.listPendingGroups() })))
+app.delete('/api/pending-groups', auth.requireUserAdmin, wrap(async (req, res) => {
+  const { sid, jid } = req.query
+  if (!sid || !jid) return bad(res, 'sid and jid required')
+  await store.delPendingGroup(sid, jid); auth.audit(req, 'group.pending.dismiss', `${sid}:${jid}`); ok(res, {})
+}))
+
 app.get('/api/keywords', wrap(async (req, res) => ok(res, { keywords: await store.listKeywords() })))
 app.post('/api/keywords', auth.requireWrite, wrap(async (req, res) => {
   const word = (typeof req.body?.word === 'string' ? req.body.word : '').trim().slice(0, 100)
@@ -221,6 +233,57 @@ app.post('/api/keywords', auth.requireWrite, wrap(async (req, res) => {
   await store.addKeyword(word); auth.audit(req, 'keyword.add', word); ok(res, {})
 }))
 app.delete('/api/keywords/:id', auth.requireWrite, wrap(async (req, res) => { await store.delKeyword(Number(req.params.id)); auth.audit(req, 'keyword.del', req.params.id); ok(res, {}) }))
+
+// ---- report ----------------------------------------------------------------
+// Renders the WhatsApp activity report (scoped to the caller's sessions).
+// ?download=1 forces a file download; otherwise it's served inline for viewing.
+const reportDays = (v) => { if (v == null || v === 'all') return null; const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 90 ? n : null }
+app.get('/api/report', wrap(async (req, res) => {
+  const ids = await idsFor(req)
+  const ai = !!req.query.ai && auth.isAdminish(req.user.role) // AI pass is admin-only (it costs per run)
+  const { html } = await report.generateReport({ ids, days: reportDays(req.query.days), ai })
+  if (ai) auth.audit(req, 'report.ai')
+  if (req.query.download) {
+    const fn = `whatsapp-report-${new Date().toISOString().slice(0, 10)}.html`
+    res.setHeader('Content-Disposition', `attachment; filename="${fn}"`)
+    auth.audit(req, 'report.download')
+  }
+  res.type('html').send(html)
+}))
+
+// ---- raw chat data export (for offline analysis in Claude Code — no API) ----
+app.get('/api/report/chats', wrap(async (req, res) => {
+  const ids = await idsFor(req)
+  const { text } = await chatExport.buildTranscript({ ids, days: reportDays(req.query.days) })
+  const body = text || 'No messages in the selected window.'
+  if (req.query.download) {
+    res.setHeader('Content-Disposition', `attachment; filename="whatsapp-chats-${new Date().toISOString().slice(0, 10)}.txt"`)
+    auth.audit(req, 'chats.download')
+  }
+  res.type('text/plain; charset=utf-8').send(body)
+}))
+
+// ---- saved AI reports (generate once, store, reuse — no repeat API spend) ----
+// Generate an AI report and STORE it. Admin-only (it spends API tokens).
+app.post('/api/reports', auth.requireUserAdmin, wrap(async (req, res) => {
+  const ids = await idsFor(req)
+  const days = reportDays(req.query.days)
+  const { html, stats } = await report.generateReport({ ids, days, ai: true })
+  const id = await store.saveReport({ created_by: req.user.username, window_days: days || 0, msg_count: stats.messages, chat_count: stats.chats, html })
+  auth.audit(req, 'report.ai.generate', String(id))
+  ok(res, { id })
+}))
+app.get('/api/reports', auth.requireUserAdmin, wrap(async (req, res) => ok(res, { reports: await store.listReports() })))
+app.get('/api/reports/:id', auth.requireUserAdmin, wrap(async (req, res) => {
+  const r = await store.getReport(Number(req.params.id))
+  if (!r) return res.status(404).type('html').send('<p>Report not found.</p>')
+  if (req.query.download) {
+    res.setHeader('Content-Disposition', `attachment; filename="whatsapp-report-${new Date(Number(r.created_at)).toISOString().slice(0, 10)}.html"`)
+    auth.audit(req, 'report.download', String(r.id))
+  }
+  res.type('html').send(r.html)
+}))
+app.delete('/api/reports/:id', auth.requireUserAdmin, wrap(async (req, res) => { await store.deleteReport(Number(req.params.id)); auth.audit(req, 'report.delete', req.params.id); ok(res, {}) }))
 
 // ---- analytics & events ----------------------------------------------------
 app.get('/api/stats', wrap(async (req, res) => ok(res, { stats: await store.stats(await idsFor(req)) })))
@@ -261,10 +324,10 @@ app.post('/api/users', auth.requireUserAdmin, wrap(async (req, res) => {
   if (!username || !password) return bad(res, 'username & password required')
   const uname = String(username).trim().slice(0, 64)
   if (!uname) return bad(res, 'username required')
-  if (String(password).length < 6) return bad(res, 'password too short (min 6)')
+  if (String(password).length < 6 || String(password).length > auth.MAX_PASSWORD_LEN) return bad(res, `password must be 6–${auth.MAX_PASSWORD_LEN} characters`)
   if (!auth.ROLES.includes(role)) return bad(res, 'invalid role')
   if (await store.getUserByName(uname)) return bad(res, 'username already exists')
-  const { hash, salt } = auth.hashPassword(String(password))
+  const { hash, salt } = await auth.hashPassword(String(password))
   await store.createUser(uname, hash, salt, role)
   auth.audit(req, 'user.create', uname, role); ok(res, {})
 }))
@@ -280,8 +343,8 @@ app.post('/api/users/:id/password', auth.requireUserAdmin, wrap(async (req, res)
   if (!target) return bad(res, 'no such user')
   if (auth.isSuper(target.role)) return bad(res, 'cannot reset the super admin', 403)
   const { next } = req.body || {}
-  if (!next || String(next).length < 6) return bad(res, 'password too short (min 6)')
-  const { hash, salt } = auth.hashPassword(String(next))
+  if (!next || String(next).length < 6 || String(next).length > auth.MAX_PASSWORD_LEN) return bad(res, `password must be 6–${auth.MAX_PASSWORD_LEN} characters`)
+  const { hash, salt } = await auth.hashPassword(String(next))
   await store.setPassword(target.id, hash, salt); auth.audit(req, 'user.password.reset', target.username); ok(res, {})
 }))
 
@@ -304,9 +367,9 @@ app.delete('/api/grants/:id', auth.requireUserAdmin, wrap(async (req, res) => { 
 app.post('/api/password', wrap(async (req, res) => {
   const { current, next } = req.body || {}
   const u = await store.getUserById(req.user.id)
-  if (!u || !auth.verifyPassword(String(current || ''), u.salt, u.pass_hash)) return bad(res, 'current password wrong', 403)
-  if (!next || String(next).length < 6) return bad(res, 'new password too short (min 6)')
-  const { hash, salt } = auth.hashPassword(String(next))
+  if (!u || !(await auth.verifyPassword(String(current || ''), u.salt, u.pass_hash))) return bad(res, 'current password wrong', 403)
+  if (!next || String(next).length < 6 || String(next).length > auth.MAX_PASSWORD_LEN) return bad(res, `new password must be 6–${auth.MAX_PASSWORD_LEN} characters`)
+  const { hash, salt } = await auth.hashPassword(String(next))
   await store.setPassword(u.id, hash, salt); auth.audit(req, 'password.change'); ok(res, {})
 }))
 

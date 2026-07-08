@@ -50,6 +50,10 @@ async function init() {
     session_id TEXT, jid TEXT, subject TEXT, description TEXT, owner TEXT,
     participants INT DEFAULT 0, created_at BIGINT, PRIMARY KEY (session_id, jid)
   );
+  CREATE TABLE IF NOT EXISTS pending_groups (
+    session_id TEXT, jid TEXT, subject TEXT, participants INT DEFAULT 0,
+    ts BIGINT, PRIMARY KEY (session_id, jid)
+  );
   CREATE TABLE IF NOT EXISTS watchlist (
     id SERIAL PRIMARY KEY, session_id TEXT, kind TEXT, value TEXT, label TEXT, created_at BIGINT
   );
@@ -84,6 +88,10 @@ async function init() {
     session_id TEXT, id TEXT, value TEXT, PRIMARY KEY(session_id, id)
   );
   CREATE TABLE IF NOT EXISTS kv ( k TEXT PRIMARY KEY, v TEXT );
+  CREATE TABLE IF NOT EXISTS reports (
+    id BIGSERIAL PRIMARY KEY, created_at BIGINT, created_by TEXT,
+    window_days INT DEFAULT 0, msg_count INT DEFAULT 0, chat_count INT DEFAULT 0, html TEXT
+  );
   `)
 }
 
@@ -104,7 +112,7 @@ module.exports = {
   getSession: (id) => one(`SELECT * FROM sessions WHERE id=$1`, [id]),
   allSessions: () => all(`SELECT * FROM sessions ORDER BY created_at ASC`),
   deleteSession: async (id) => {
-    for (const t of ['chats', 'messages', 'contacts', 'groups', 'session_grants', 'wa_auth']) {
+    for (const t of ['chats', 'messages', 'contacts', 'groups', 'pending_groups', 'session_grants', 'wa_auth']) {
       await q(`DELETE FROM ${t} WHERE session_id=$1`, [id])
     }
     await q(`DELETE FROM sessions WHERE id=$1`, [id])
@@ -182,12 +190,30 @@ module.exports = {
   listGroups: (sid) => all(`SELECT * FROM groups WHERE session_id=$1 ORDER BY subject ASC`, [sid]),
   groupExists: async (sid, jid) => (await all(`SELECT 1 FROM groups WHERE session_id=$1 AND jid=$2 LIMIT 1`, [sid, jid])).length > 0,
 
+  // ---- pending groups (new joins awaiting an admin decision) ----
+  addPendingGroup: (r) => q(`INSERT INTO pending_groups (session_id,jid,subject,participants,ts) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (session_id,jid) DO UPDATE SET subject=$3, participants=$4, ts=$5`,
+    [r.session_id, r.jid, r.subject, r.participants || 0, r.ts || Date.now()]),
+  listPendingGroups: () => all(`SELECT p.*, s.name AS session_name FROM pending_groups p
+      LEFT JOIN sessions s ON s.id=p.session_id ORDER BY p.ts DESC`),
+  delPendingGroup: (sid, jid) => q(`DELETE FROM pending_groups WHERE session_id=$1 AND jid=$2`, [sid, jid]),
+
   // ---- watchlist / keywords ----
   addWatch: (sid, kind, value, label) => q(`INSERT INTO watchlist (session_id,kind,value,label,created_at) VALUES ($1,$2,$3,$4,$5)`, [sid, kind, value, label, Date.now()]),
   delWatch: (id) => q(`DELETE FROM watchlist WHERE id=$1`, [id]),
-  listWatch: (sid) => sid ? all(`SELECT * FROM watchlist WHERE session_id=$1 OR session_id='*' ORDER BY created_at DESC`, [sid]) : all(`SELECT * FROM watchlist ORDER BY created_at DESC`),
+  // `members` = current participant count for group watches, null for number watches.
+  // Match on subject case/whitespace-insensitively — watch values are often typed by hand.
+  listWatch: (sid) => sid
+    ? all(`SELECT w.*, g.participants AS members FROM watchlist w
+           LEFT JOIN groups g ON g.session_id=w.session_id AND LOWER(TRIM(g.subject))=LOWER(TRIM(w.value)) AND w.kind='group'
+           WHERE w.session_id=$1 OR w.session_id='*' ORDER BY w.created_at DESC`, [sid])
+    : all(`SELECT w.*, g.participants AS members FROM watchlist w
+           LEFT JOIN groups g ON g.session_id=w.session_id AND LOWER(TRIM(g.subject))=LOWER(TRIM(w.value)) AND w.kind='group'
+           ORDER BY w.created_at DESC`),
   getWatch: (id) => one(`SELECT * FROM watchlist WHERE id=$1`, [id]),
-  listWatchScoped: (ids) => (!ids || ids.length === 0) ? [] : all(`SELECT * FROM watchlist WHERE session_id = ANY($1) ORDER BY created_at DESC`, [ids]),
+  listWatchScoped: (ids) => (!ids || ids.length === 0) ? [] : all(`SELECT w.*, g.participants AS members FROM watchlist w
+      LEFT JOIN groups g ON g.session_id=w.session_id AND LOWER(TRIM(g.subject))=LOWER(TRIM(w.value)) AND w.kind='group'
+      WHERE w.session_id = ANY($1) ORDER BY w.created_at DESC`, [ids]),
   addKeyword: (w) => q(`INSERT INTO keywords (word,created_at) VALUES ($1,$2)`, [w, Date.now()]),
   delKeyword: (id) => q(`DELETE FROM keywords WHERE id=$1`, [id]),
   listKeywords: () => all(`SELECT * FROM keywords ORDER BY word ASC`),
@@ -225,8 +251,8 @@ module.exports = {
   topChats: (limit = 8, ids) => {
     if (ids && ids.length === 0) return []
     return ids
-      ? all(`SELECT chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL AND session_id = ANY($1) GROUP BY chat_jid, chat_name ORDER BY n DESC LIMIT $2`, [ids, limit])
-      : all(`SELECT chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL GROUP BY chat_jid, chat_name ORDER BY n DESC LIMIT $1`, [limit])
+      ? all(`SELECT session_id, chat_jid, chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL AND session_id = ANY($1) GROUP BY session_id, chat_jid, chat_name ORDER BY n DESC LIMIT $2`, [ids, limit])
+      : all(`SELECT session_id, chat_jid, chat_name, COUNT(*) n FROM messages WHERE chat_name IS NOT NULL GROUP BY session_id, chat_jid, chat_name ORDER BY n DESC LIMIT $1`, [limit])
   },
   cleanupOld: async (days = 30) => {
     const cutoff = Date.now() - days * 24 * 3600 * 1000
@@ -267,6 +293,14 @@ module.exports = {
       users: await n(`SELECT COUNT(*) n FROM users`),
     }
   },
+
+  // ---- saved AI reports (stored snapshots — generate once, reuse) ----
+  saveReport: async (r) => (await one(`INSERT INTO reports (created_at,created_by,window_days,msg_count,chat_count,html)
+      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [Date.now(), r.created_by || '', r.window_days || 0, r.msg_count || 0, r.chat_count || 0, r.html])).id,
+  listReports: (limit = 100) => all(`SELECT id, created_at, created_by, window_days, msg_count, chat_count FROM reports ORDER BY id DESC LIMIT $1`, [limit]),
+  getReport: (id) => one(`SELECT * FROM reports WHERE id=$1`, [id]),
+  deleteReport: (id) => q(`DELETE FROM reports WHERE id=$1`, [id]),
 
   // ---- key/value (license cache etc.) ----
   kvGet: async (k) => { const r = await one(`SELECT v FROM kv WHERE k=$1`, [k]); return r ? r.v : null },

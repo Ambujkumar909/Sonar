@@ -6,18 +6,30 @@
 //  - audit() records every meaningful action with user + IP
 // =============================================================
 const crypto = require('crypto')
+const { promisify } = require('util')
 const fs = require('fs')
 const path = require('path')
 const store = require('./store')
 const cfg = require('./config')
 
+const scrypt = promisify(crypto.scrypt)
+
 // ---- password hashing ------------------------------------------------------
-function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex')
+// Cap input length: scrypt's cost scales with the passphrase, so an unbounded
+// password is a CPU / event-loop DoS. 128 chars is ample for any real password.
+const MAX_PASSWORD_LEN = 128
+async function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD_LEN) {
+    throw new Error('password exceeds maximum length')
+  }
+  // async scrypt → runs on the libuv threadpool, never blocks the event loop
+  const hash = (await scrypt(password, salt, 64)).toString('hex')
   return { hash, salt }
 }
-function verifyPassword(password, salt, expected) {
-  const { hash } = hashPassword(password, salt)
+async function verifyPassword(password, salt, expected) {
+  // Reject oversized input WITHOUT hashing it (defends against long-password DoS).
+  if (typeof password !== 'string' || password.length > MAX_PASSWORD_LEN) return false
+  const { hash } = await hashPassword(password, salt)
   const a = Buffer.from(hash, 'hex'), b = Buffer.from(expected, 'hex')
   return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
@@ -40,7 +52,7 @@ const SEED_USER = process.env.SONAR_SUPERADMIN_USER || 'admin@sonar'
 const SEED_PASS = process.env.SONAR_SUPERADMIN_PASS || 'Admin@123$'
 async function ensureBootstrapAdmin() {
   if (await store.countUsers() > 0) return
-  const { hash, salt } = hashPassword(SEED_PASS)
+  const { hash, salt } = await hashPassword(SEED_PASS)
   await store.createUser(SEED_USER, hash, salt, 'super_admin')
   console.log('\n  ╭──────────────────────────────────────────────╮')
   console.log('  │  Sonar SUPER ADMIN seeded                    │')
@@ -137,5 +149,5 @@ module.exports = {
   hashPassword, verifyPassword, newToken, ensureBootstrapAdmin,
   getCookie, setAuthCookie, clearAuthCookie, ipOf, currentUser,
   requireAuth, requireUserAdmin, requireSuperAdmin, requireWrite, requireSessionAccess,
-  audit, TOKEN_COOKIE, ROLES, isSuper, isAdminish, canWrite,
+  audit, TOKEN_COOKIE, ROLES, MAX_PASSWORD_LEN, isSuper, isAdminish, canWrite,
 }

@@ -234,6 +234,7 @@ class SessionManager {
       sock.ev.on('contacts.update', (cs) => this.onContacts(id, cs))
       sock.ev.on('groups.upsert', (gs) => this.onGroups(id, gs, true))
       sock.ev.on('groups.update', (gs) => this.onGroups(id, gs, false))
+      sock.ev.on('group-participants.update', (u) => this.onGroupParticipants(id, u))
       sock.ev.on('chats.upsert', (cs) => this.onChats(id, cs))
 
       this.armWatchdog(id)
@@ -530,14 +531,33 @@ class SessionManager {
         created_at: (g.creation || 0) * 1000,
       })
       if (isNew && g.subject) {
+        const participants = g.participants?.length || g.size || 0
+        const ts = Date.now()
         this.log(id, 'info', 'group', `Added to new group "${g.subject}"`)
-        this.emit('newgroup', {
-          sessionId: id, jid: g.id, subject: g.subject,
-          participants: g.participants?.length || g.size || 0, ts: Date.now(),
-        })
+        // Persist so any admin sees it as pending, even if no dashboard was open.
+        await store.addPendingGroup({ session_id: id, jid: g.id, subject: g.subject, participants, ts })
+        this.emit('newgroup', { sessionId: id, jid: g.id, subject: g.subject, participants, ts })
       }
     }
     this.emit('groups', { id })
+  }
+
+  // A member joined/left a group — refresh the stored participant count in real time
+  // so the watchlist "Members" column stays accurate without waiting for a live fetch.
+  async onGroupParticipants(id, update) {
+    try {
+      const s = this.sessions.get(id)
+      if (!s?.sock || !update?.id) return
+      const meta = await s.sock.groupMetadata(update.id)
+      if (!meta) return
+      store.upsertGroup({
+        session_id: id, jid: update.id, subject: meta.subject || '',
+        description: meta.desc || '', owner: meta.owner || '',
+        participants: meta.participants?.length || meta.size || 0,
+        created_at: (meta.creation || 0) * 1000,
+      })
+      this.emit('groups', { id })
+    } catch {}
   }
 
   onChats(id) {
