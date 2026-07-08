@@ -25,8 +25,7 @@ const SCHEMA = {
     verdict: { type: 'string', description: 'ONE dense paragraph (plain text; use **bold** and *italic* for emphasis, verbatim short quotes in "quotes"). The single most important read of the window — dominant themes, named accounts, and the levers to pull.' },
     banner: {
       type: 'array',
-      description: 'EXACTLY three at-a-glance boxes, in this order: one bad (open/escalating), one warn (stock/risk), one good (resolved/positive).',
-      minItems: 3, maxItems: 3,
+      description: 'EXACTLY three at-a-glance boxes (return 3 items), in this order: one bad (open/escalating), one warn (stock/risk), one good (resolved/positive).',
       items: {
         type: 'object', additionalProperties: false,
         properties: {
@@ -39,8 +38,7 @@ const SCHEMA = {
     },
     kpis: {
       type: 'array',
-      description: 'Exactly three HEADLINE KPIs derived from the chats (beyond total groups/messages, which are added separately). e.g. accounts hit by stock, dispatch-chasing accounts, biggest open credit block.',
-      minItems: 3, maxItems: 3,
+      description: 'Exactly three HEADLINE KPIs (return 3 items) derived from the chats (beyond total groups/messages, which are added separately). e.g. accounts hit by stock, dispatch-chasing accounts, biggest open credit block.',
       items: {
         type: 'object', additionalProperties: false,
         properties: {
