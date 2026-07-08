@@ -92,6 +92,10 @@ async function init() {
     id BIGSERIAL PRIMARY KEY, created_at BIGINT, created_by TEXT,
     window_days INT DEFAULT 0, msg_count INT DEFAULT 0, chat_count INT DEFAULT 0, html TEXT
   );
+  CREATE TABLE IF NOT EXISTS report_emails (
+    id BIGSERIAL PRIMARY KEY, email TEXT UNIQUE, label TEXT,
+    enabled INT DEFAULT 1, created_by TEXT, created_at BIGINT
+  );
   `)
 }
 
@@ -301,6 +305,16 @@ module.exports = {
   listReports: (limit = 100) => all(`SELECT id, created_at, created_by, window_days, msg_count, chat_count FROM reports ORDER BY id DESC LIMIT $1`, [limit]),
   getReport: (id) => one(`SELECT * FROM reports WHERE id=$1`, [id]),
   deleteReport: (id) => q(`DELETE FROM reports WHERE id=$1`, [id]),
+
+  // ---- report email recipients (who the daily report is mailed to) ----
+  listReportEmails: () => all(`SELECT id, email, label, enabled, created_by, created_at FROM report_emails ORDER BY email ASC`),
+  listEnabledReportEmails: () => all(`SELECT email FROM report_emails WHERE enabled=1 ORDER BY email ASC`),
+  addReportEmail: async (email, label, by) => (await one(
+    `INSERT INTO report_emails (email,label,enabled,created_by,created_at) VALUES ($1,$2,1,$3,$4)
+     ON CONFLICT (email) DO UPDATE SET label=EXCLUDED.label RETURNING id`,
+    [email, label || '', by || '', Date.now()])).id,
+  setReportEmailEnabled: (id, enabled) => q(`UPDATE report_emails SET enabled=$2 WHERE id=$1`, [id, enabled ? 1 : 0]),
+  deleteReportEmail: (id) => q(`DELETE FROM report_emails WHERE id=$1`, [id]),
 
   // ---- key/value (license cache etc.) ----
   kvGet: async (k) => { const r = await one(`SELECT v FROM kv WHERE k=$1`, [k]); return r ? r.v : null },

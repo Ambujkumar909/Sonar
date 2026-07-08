@@ -35,3 +35,6 @@ license-keys.txt
 
 # offline license signing keys — keep PRIVATE
 keys/
+
+# confidential reference reports (real customer data) — keep local only
+00_Customer_Chat_Review_*.html

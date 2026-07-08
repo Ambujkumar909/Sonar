@@ -34,12 +34,12 @@ const urlTheme = new URLSearchParams(location.search).get('theme')
 applyTheme(urlTheme || localStorage.getItem('sonar-theme') || 'light')
 
 /* ---------- navigation ---------- */
-const TITLES = { dashboard: 'Dashboard', reports: 'Reports', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
+const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Reports', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
 function go(view) {
   if (!TITLES[view]) view = 'dashboard'
   // route guards (defence in depth — API enforces too)
   if (view === 'audit' && state.me && state.me.role !== 'super_admin') view = 'dashboard'
-  if ((view === 'users' || view === 'license') && !(state.me && (state.me.role === 'admin' || state.me.role === 'super_admin'))) view = 'dashboard'
+  if ((view === 'users' || view === 'license' || view === 'emails') && !(state.me && (state.me.role === 'admin' || state.me.role === 'super_admin'))) view = 'dashboard'
   state.view = view
   $$('.view').forEach(v => v.classList.add('hide'))
   $('#view-' + view).classList.remove('hide')
@@ -118,7 +118,7 @@ function refreshChrome() {
    RENDER ROUTER
    ============================================================= */
 function render(view) {
-  ({ dashboard: renderDashboard, reports: renderReports, sessions: renderSessions, chats: renderChats,
+  ({ dashboard: renderDashboard, reports: renderReports, emails: renderEmails, sessions: renderSessions, chats: renderChats,
      watchlist: renderWatchlist, keywords: renderKeywords, health: renderHealth,
      audit: renderAudit, license: renderLicense, users: renderUsers, files: renderFiles, about: renderAbout }[view] || (() => {}))()
   requestAnimationFrame(() => stagger($('#view-' + view)))
@@ -268,6 +268,76 @@ window.delReport = async (id) => {
   const r = await del('/reports/' + id)
   if (r && r.ok === false) return toast(r.error || 'Could not delete', 'err')
   toast('Report deleted'); loadSavedReports()
+}
+
+/* ---------- EMAIL REPORTS ---------- */
+async function renderEmails() {
+  const r = await api('/report-emails')
+  if (!r || !r.ok) return
+  const s = r.schedule || {}
+  const smtp = s.smtpConfigured
+    ? `<span class="pill" style="font-size:11.5px"><span class="dot ok"></span>SMTP ready${s.from ? ' · ' + esc(s.from) : ''}</span>`
+    : `<span class="pill" style="font-size:11.5px"><span class="dot bad"></span>SMTP not configured — set EMAIL_* in .env</span>`
+  $('#scheduleCard').innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div><h3 style="margin:0">Daily report schedule</h3>
+        <div style="font-size:13px;color:var(--ink-soft);margin-top:4px">
+          ${s.enabled ? `Runs daily at <b>${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}</b> (${esc(s.tz)}) · covers the last 24 hours · next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b> (REPORT_SCHEDULE=0)'}
+        </div>
+        <div style="margin-top:8px">${smtp}</div>
+      </div>
+      <div style="margin-left:auto"><button class="btn" id="runNowBtn">▶ Generate &amp; send now</button></div>
+    </div>
+    <div class="inline-form" style="margin-top:14px;align-items:flex-end">
+      <div class="field" style="flex:1"><label>Send a SAMPLE report to (optional — blank = all enabled recipients)</label><input class="in" id="testEmail" placeholder="you@company.com" /></div>
+      <button class="btn primary" id="sendTestBtn">✉ Send sample report</button>
+    </div>
+    <p style="margin-top:10px;font-size:12.5px;color:var(--ink-faint)"><b>Send sample report</b> emails a fully-populated demo report (charts + tables) — best for testing delivery &amp; format. <b>Generate &amp; send now</b> runs the real daily job on live data (saves under Reports).</p>`
+  $('#runNowBtn').onclick = runReportNow
+  $('#sendTestBtn').onclick = sendTestReport
+
+  const rows = r.emails || []
+  $('#emailTable').innerHTML = `<thead><tr><th>Email</th><th>Label</th><th>Status</th><th></th></tr></thead><tbody>${
+    rows.length ? rows.map(e => `<tr>
+      <td><b>${esc(e.email)}</b></td>
+      <td>${esc(e.label || '')}</td>
+      <td>${e.enabled ? '<span class="pill" style="font-size:11px;background:var(--ok,#1c8f52);color:#fff">Enabled</span>' : '<span class="pill" style="font-size:11px;background:#9aa6b2;color:#fff">Disabled</span>'}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn" data-act="toggleemail" data-id="${e.id}" data-on="${e.enabled ? 0 : 1}">${e.enabled ? 'Disable' : 'Enable'}</button>
+        <button class="btn danger" data-act="delemail" data-id="${e.id}">Remove</button>
+      </td></tr>`).join('')
+    : '<tr><td colspan="4"><div class="empty">No recipients yet — add an email above. The daily report is saved regardless, but only emailed to enabled recipients.</div></td></tr>'}</tbody>`
+}
+$('#addEmailBtn').onclick = async () => {
+  const email = $('#emailAddr').value.trim(), label = $('#emailLabel').value.trim()
+  if (!email) return toast('Enter an email')
+  const r = await post('/report-emails', { email, label })
+  if (r && r.ok === false) return toast(r.error || 'Could not add', 'err')
+  $('#emailAddr').value = ''; $('#emailLabel').value = ''; toast('Recipient added'); renderEmails()
+}
+window.toggleEmail = async (id, on) => { await post(`/report-emails/${id}/toggle`, { enabled: !!on }); toast(on ? 'Enabled' : 'Disabled'); renderEmails() }
+window.delEmail = async (id) => { if (!confirm('Remove this recipient?')) return; await del('/report-emails/' + id); toast('Removed'); renderEmails() }
+async function runReportNow() {
+  const btn = $('#runNowBtn'); if (btn) { btn.disabled = true; btn.textContent = '… running' }
+  try {
+    const r = await post('/report-emails/run-now', {})
+    if (r && r.ok) {
+      if (!r.smtp) toast(`Report #${r.id} saved (${r.stats.messages} msgs). SMTP not configured — not emailed.`, 'alert')
+      else if (r.emailError) toast(`Report #${r.id} saved, but email failed: ${esc(r.emailError)}`, 'err')
+      else toast(`Report #${r.id} saved & emailed to ${r.emailed}/${r.recipients} recipient(s).`)
+    } else toast((r && r.error) || 'Run failed', 'err')
+  } catch { toast('Run failed', 'err') }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '▶ Generate & send now' }; renderEmails() }
+}
+async function sendTestReport() {
+  const to = $('#testEmail').value.trim()
+  const btn = $('#sendTestBtn'); if (btn) { btn.disabled = true; btn.textContent = '… sending' }
+  try {
+    const r = await post('/report-emails/send-test', to ? { to } : {})
+    if (r && r.ok) toast(`Sample report emailed to ${esc((r.to || []).join(', '))} ✓`)
+    else toast((r && r.error) || 'Send failed', 'err')
+  } catch { toast('Send failed', 'err') }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '✉ Send sample report' } }
 }
 
 /* ---------- SESSIONS ---------- */
@@ -789,6 +859,8 @@ document.addEventListener('click', (e) => {
     case 'dismissgroup': dismissNewGroup(a.sid, a.jid); break
     case 'viewreport': viewReport(a.id); break
     case 'delreport': delReport(a.id); break
+    case 'toggleemail': toggleEmail(a.id, Number(a.on)); break
+    case 'delemail': delEmail(a.id); break
     case 'sortwatch': {
       const s = state.watchSort
       state.watchSort = (s && s.key === a.key) ? { key: a.key, dir: -s.dir } : { key: a.key, dir: 1 }
@@ -830,6 +902,7 @@ function showUser(me) {
     if (b.dataset.view === 'audit') b.style.display = isSuper() ? '' : 'none'
     if (b.dataset.view === 'users') b.style.display = isAdminish() ? '' : 'none'
     if (b.dataset.view === 'license') b.style.display = isAdminish() ? '' : 'none' // admin + super see countdown
+    if (b.dataset.view === 'emails') b.style.display = isAdminish() ? '' : 'none' // report recipients → admin only
   })
 }
 /* profile popover */

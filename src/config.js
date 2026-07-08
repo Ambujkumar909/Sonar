@@ -62,4 +62,23 @@ module.exports = {
   // STRICT: new sessions listen to NOTHING until groups/numbers are added to the
   // watchlist. "Watch all" can only be enabled by a super_admin.
   DEFAULT_WATCH_ALL_GROUPS: false,
+
+  // SMTP — used to email the daily report. Accepts EMAIL_* (preferred) or SMTP_*
+  // names. Configured = host + user + pass all set.
+  SMTP: {
+    host: process.env.EMAIL_HOST || process.env.SMTP_HOST || '',
+    port: Number(process.env.EMAIL_PORT || process.env.SMTP_PORT) || 587,
+    secure: (process.env.EMAIL_SECURE || process.env.SMTP_SECURE) === '1' || Number(process.env.EMAIL_PORT || process.env.SMTP_PORT) === 465,
+    user: process.env.EMAIL_USER || process.env.SMTP_USER || '',
+    pass: process.env.EMAIL_PASS || process.env.SMTP_PASS || '',
+    from: process.env.EMAIL_FROM || process.env.MAIL_FROM || process.env.EMAIL_USER || process.env.SMTP_USER || '',
+  },
+
+  // Daily report scheduler — generates + saves + emails the last-24h report.
+  REPORT: {
+    enabled: process.env.REPORT_SCHEDULE !== '0', // on by default; set REPORT_SCHEDULE=0 to disable
+    hour: Number.isFinite(Number(process.env.REPORT_HOUR)) ? Number(process.env.REPORT_HOUR) : 19, // 24h clock
+    minute: Number(process.env.REPORT_MINUTE) || 0,
+    tz: process.env.REPORT_TZ || 'Asia/Kolkata', // 7pm is computed in THIS timezone, not the server's
+  },
 }

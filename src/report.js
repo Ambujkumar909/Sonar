@@ -1,99 +1,126 @@
 // =============================================================
-//  Sonar — WhatsApp activity report (shared builder)
-//  Used by the /api/report endpoint and the CLI generator.
-//  Reads the platform's own Postgres data and returns HTML.
-//  Team vs Dealer is derived from message direction (from_me).
+//  Sonar — WhatsApp "Customer Chat Review" report (shared builder)
+//  Used by /api/report (free metrics view) and /api/reports (saved
+//  AI report). Pulls authoritative counts from Postgres, asks Claude
+//  for the qualitative sections, and renders the D'Decor management
+//  report format via src/reportTemplate.js.
 // =============================================================
 const store = require('./store')
 const aiReport = require('./aiReport')
+const { renderReport } = require('./reportTemplate')
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0)
-const clip = (s, n = 90) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s }
 const IN = (opts) => (ms) => (ms ? new Date(Number(ms)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...opts }) : '—')
 const fmtDateTime = IN({ day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-const fmtDate = IN({ day: '2-digit', month: 'short', year: 'numeric' })
-
-const CSS = `
-:root{--ink:#1f2933;--mut:#52606d;--line:#e4e7eb;--head:#0b3d59;--accent:#0a6;}
-*{box-sizing:border-box}
-body{font-family:'Segoe UI',Calibri,Arial,sans-serif;color:var(--ink);line-height:1.55;max-width:1000px;margin:0 auto;padding:32px 44px;background:#fff;font-size:15px}
-h1{font-size:26px;color:var(--head);border-bottom:3px solid var(--head);padding-bottom:10px;margin:0 0 14px}
-h2{font-size:19px;color:var(--head);margin-top:30px;border-bottom:1px solid var(--line);padding-bottom:6px}
-strong{color:#0b2e3f}em{color:#3a4a52}
-table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
-th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
-th{background:var(--head);color:#fff;font-weight:600}
-tr:nth-child(even) td{background:#f7f9fb}
-hr{border:none;border-top:1px solid var(--line);margin:24px 0}
-ul{padding-left:22px}
-.meta{color:var(--mut);font-size:14px;margin:2px 0}
-.note{margin:16px 0;padding:12px 16px;background:#eef6fb;border:1px solid #bcd9ea;border-radius:6px;font-size:13.5px;color:#234b5e}
-.crit{margin:16px 0;padding:12px 16px;background:#fdecec;border:1px solid #f3b9b9;border-radius:6px;font-size:13.5px;color:#7a1c1c}
-.num{text-align:right;font-variant-numeric:tabular-nums}
-`
-
-function shell(inner, title) {
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><style>${CSS}</style></head><body>${inner}</body></html>`
-}
+const fmtDayRaw = IN({ day: '2-digit', month: 'short', year: 'numeric' })
+const fmtDay = (ms) => fmtDayRaw(ms).replace(/ /g, '-') // 06-Jul-2026
+const norm = (s) => String(s || '').trim().toLowerCase()
 
 // ids: undefined/null = all sessions; [] = no access; [..] = scoped
 async function generateReport({ ids, days = null, ai = false, generatedAt = Date.now() } = {}) {
   const scoped = Array.isArray(ids)
   const genOn = fmtDateTime(generatedAt)
-  const title = "D'Decor — WhatsApp Activity Report"
+  const daysLabel = days ? `${days}-Day Snapshot` : 'Full History'
+  const msgWindow = days ? `${days}d` : 'all'
+  const title = `D'Decor — Customer Chat Review (${daysLabel})`
+
+  const footerBase = (win) => `Generated from Sonar-captured WhatsApp chats (${win}). Quotes verbatim from chat (Hindi context translated). Concern counts are accounts-affected, not message counts. Cross-reference SAP/ERP for exact order/stock/credit status. Confidential — internal management use only.`
 
   if (scoped && ids.length === 0) {
-    return { html: shell(`<h1>${title}</h1><p class="meta"><strong>Generated:</strong> ${esc(genOn)}</p><div class="crit"><strong>No sessions granted.</strong> You don't have access to any monitored sessions yet.</div>`, title), stats: { messages: 0, chats: 0, sessions: 0 } }
+    return {
+      html: renderReport({
+        title, subtitle: 'Sonar WhatsApp capture', tagLine: 'No sessions granted',
+        kpis: [], groups: [], ai: false, footerNote: footerBase('—'),
+      }),
+      stats: { messages: 0, chats: 0 },
+    }
   }
 
   const q = (sql, params) => store.pool.query(sql, params)
-  // message filter: session scope (if any) + optional time window
   const conds = [], p = []
   if (scoped) { p.push(ids); conds.push(`session_id = ANY($${p.length})`) }
   if (days) { p.push(generatedAt - days * 86400000); conds.push(`ts >= $${p.length}`) }
   const filt = conds.length ? ' WHERE ' + conds.join(' AND ') : ''
 
-  const t = (await q(`SELECT COUNT(*)::int n, COALESCE(SUM(from_me),0)::int team,
-      COUNT(DISTINCT (session_id, chat_jid))::int chats, MIN(ts) mn, MAX(ts) mx
-    FROM messages${filt}`, p)).rows[0] || {}
-  const range = { mn: t.mn, mx: t.mx }
-  const totalMsgs = t.n || 0, totalTeam = t.team || 0, totalDealer = totalMsgs - totalTeam, chatCount = t.chats || 0
-
-  const windowLabel = days ? `Last ${days} day${days > 1 ? 's' : ''}` : 'All captured data'
-  let h = `<h1>${title}</h1>
-<p class="meta"><strong>Window:</strong> ${esc(windowLabel)} &nbsp;|&nbsp; <strong>Data range:</strong> ${fmtDate(range.mn)} → ${fmtDate(range.mx)} &nbsp;|&nbsp; <strong>Generated:</strong> ${esc(genOn)}</p>
-<p class="meta"><strong>Coverage:</strong> ${chatCount} chats monitored</p>
-<p class="meta"><strong>Volume:</strong> ${totalMsgs.toLocaleString('en-IN')} messages — <strong>${totalTeam.toLocaleString('en-IN')} team (${pct(totalTeam, totalMsgs)}%) / ${totalDealer.toLocaleString('en-IN')} dealer (${pct(totalDealer, totalMsgs)}%)</strong></p>`
+  const t = (await q(`SELECT COUNT(*)::int n, COUNT(DISTINCT (session_id, chat_jid))::int chats, MIN(ts) mn, MAX(ts) mx FROM messages${filt}`, p)).rows[0] || {}
+  const totalMsgs = t.n || 0
+  const windowShort = totalMsgs ? `${fmtDay(t.mn)} → ${fmtDay(t.mx)}` : daysLabel
 
   if (totalMsgs === 0) {
-    h += `<div class="crit"><strong>No messages captured yet.</strong> There is no stored chat data to report on. This is expected until a WhatsApp session is linked and it captures watchlisted chats.</div>`
-    return { html: shell(h, title), stats: { messages: 0, chats: 0 } }
-  }
-
-  h += `<div class="note"><strong>About this report.</strong> Generated from Sonar's captured WhatsApp chats. <em>Team vs Dealer</em> is derived from message direction (outgoing = team; incoming = dealer).</div>`
-
-  // AI narrative sections (executive summary, escalations, service quality, action list)
-  if (ai) {
-    try {
-      const a = await aiReport.analyze({ ids, days, generatedAt })
-      h += '<hr>' + a.html
-    } catch (e) {
-      h += `<div class="crit"><strong>AI analysis unavailable.</strong> ${esc(e.message)}</div>`
+    return {
+      html: renderReport({
+        title, subtitle: `Source: Sonar WhatsApp capture · generated ${genOn}`,
+        tagLine: `Window: ${daysLabel} · no messages captured yet`,
+        kpis: [{ value: '0', label: 'Groups' }, { value: '0', label: 'Messages' }, { value: '0', label: 'POs / Orders ref.', cls: 'green' }],
+        groups: [], ai: false, footerNote: footerBase(daysLabel),
+      }),
+      stats: { messages: 0, chats: 0 },
     }
-  } else {
-    h += `<div class="note">Click <strong>Generate AI report</strong> for the full analysis — executive summary, critical escalations, service-quality assessment, and consolidated action list.</div>`
   }
 
-  h += `<hr>
-<h2>Methodology &amp; Caveats</h2>
-<ul>
-<li>Generated from Sonar's captured WhatsApp chats — only watchlisted chats are captured.</li>
-<li><strong>Team vs Dealer</strong> uses message direction (outgoing = team, incoming = dealer).</li>
-<li>PO numbers, quantities, and quotes in the AI analysis are as stated in-chat — cross-check ERP for transaction-grade accuracy.</li>
-</ul>`
+  // Authoritative per-chat message counts (chart + all-groups table).
+  const ga = (await q(
+    `SELECT COALESCE(NULLIF(chat_name, ''), chat_jid) name, COUNT(*)::int msgs, MAX(is_group)::int is_group
+     FROM messages${filt} GROUP BY 1 ORDER BY msgs DESC`, p)).rows
+  const groupActivity = ga.map((r) => ({ name: r.name, msgs: r.msgs, is_group: !!r.is_group }))
+  const groupCount = groupActivity.filter((g) => g.is_group).length || groupActivity.length
 
-  return { html: shell(h, title), stats: { messages: totalMsgs, chats: chatCount } }
+  // PO / order numbers referenced (distinct 6-digit tokens) — a proxy count.
+  let poCount = 0
+  try {
+    const poFilt = filt ? filt + " AND text ~ '\\d{6}'" : " WHERE text ~ '\\d{6}'"
+    poCount = (await q(`SELECT COUNT(DISTINCT tok)::int n FROM (SELECT (regexp_matches(text, '(\\d{6})', 'g'))[1] tok FROM messages${poFilt}) s`, p)).rows[0]?.n || 0
+  } catch { poCount = 0 }
+
+  // Base KPIs (authoritative, from data).
+  const kpis = [
+    { value: String(groupCount), label: 'Groups (active)' },
+    { value: '~' + totalMsgs.toLocaleString('en-IN'), label: `Messages (${msgWindow})` },
+    { value: (poCount || 0) + '+', label: 'POs / Orders ref.', cls: 'green' },
+  ]
+
+  // ---- AI qualitative pass ----
+  let aidata = null
+  if (ai) {
+    const r = await aiReport.analyze({ ids, days, generatedAt, groupActivity: groupActivity.map((g) => ({ name: g.name, msgs: g.msgs })) })
+    aidata = r.data // may be null if window empty (shouldn't be here)
+  }
+  const aiOk = !!aidata
+
+  // Merge AI per-group status/concern onto authoritative counts.
+  const aiByName = new Map((aidata?.groups || []).map((g) => [norm(g.group), g]))
+  const groups = groupActivity.map((g) => {
+    const a = aiByName.get(norm(g.name))
+    return { group: g.name, msgs: g.msgs, statusCls: a?.status_class, statusLabel: a?.status_label, concern: a?.concern }
+  })
+
+  const data = {
+    title,
+    subtitle: `Source: Sonar WhatsApp capture · ${groupCount} group${groupCount !== 1 ? 's' : ''} · generated ${genOn}`,
+    tagLine: `Window: ${windowShort}  |  ${groupCount} groups  |  ~${totalMsgs.toLocaleString('en-IN')} messages  |  ${poCount}+ POs/orders`,
+    windowShort,
+    kpis,
+    groups,
+    ai: aiOk,
+    footerNote: footerBase(windowShort),
+  }
+
+  if (aiOk) {
+    data.verdictTitle = aidata.verdict_title
+    data.verdictHtml = aidata.verdict
+    data.banner = aidata.banner
+    data.escalations = aidata.escalations
+    data.concernMix = (aidata.concern_mix || []).map((c) => ({ label: c.label, count: c.count }))
+    data.actionsImmediate = aidata.actions_immediate
+    data.actionsStructural = aidata.actions_structural
+    data.kpis = [...kpis, ...(aidata.kpis || []).map((k) => ({ value: k.value, label: k.label, cls: k.tone }))]
+  }
+
+  const summary = {
+    title, windowShort,
+    verdict: aiOk ? String(aidata.verdict || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1') : '',
+    kpis: data.kpis,
+  }
+  return { html: renderReport(data), stats: { messages: totalMsgs, chats: t.chats || 0 }, summary }
 }
 
 module.exports = { generateReport }

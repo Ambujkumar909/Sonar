@@ -9,6 +9,7 @@ docs
 tests
 scripts
 !scripts/export-chats.js
+!scripts/daily-report.js
 *.pdf
 license-keys.txt
 ADMIN_CREDENTIALS.txt

@@ -1,16 +1,17 @@
 // =============================================================
-//  Sonar — AI narrative analysis for the WhatsApp report
-//  Reads the windowed message transcripts and produces the qualitative
-//  sections (executive summary, escalations, service-quality, actions)
-//  that can't come from SQL. Uses Claude (Anthropic SDK), structured output.
+//  Sonar — AI narrative analysis for the D'Decor "Customer Chat
+//  Review" report. Reads the windowed transcripts + a per-group
+//  message-count table (from SQL) and returns the QUALITATIVE
+//  sections that match the reference report format exactly:
+//  verdict, 3-item banner, highlight KPIs, escalations, per-group
+//  status/concern, concern-mix, and split recommendations.
 //
-//  Requires ANTHROPIC_API_KEY in the environment and outbound HTTPS to
-//  api.anthropic.com. Admin-gated at the route level (it costs per run).
+//  Returns structured data only; src/reportTemplate.js renders it.
+//  Requires ANTHROPIC_API_KEY + outbound HTTPS to api.anthropic.com.
 // =============================================================
 const Anthropic = require('@anthropic-ai/sdk')
 const { buildTranscript } = require('./chatExport')
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const isConfigured = () => !!process.env.ANTHROPIC_API_KEY
 
 // keep the transcript within a sane budget (~300k chars ≈ ~90k tokens)
@@ -20,85 +21,105 @@ const SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    executive_summary: { type: 'string', description: '2-4 short paragraphs (plain text) on the dominant themes and overall health.' },
-    recurring_issues: { type: 'array', items: { type: 'string' }, description: 'Cross-cutting issues, each a short phrase with a concrete example.' },
+    verdict_title: { type: 'string', description: 'e.g. "Portfolio Verdict — 06–07 Jul". Short.' },
+    verdict: { type: 'string', description: 'ONE dense paragraph (plain text; use **bold** and *italic* for emphasis, verbatim short quotes in "quotes"). The single most important read of the window — dominant themes, named accounts, and the levers to pull.' },
+    banner: {
+      type: 'array',
+      description: 'EXACTLY three at-a-glance boxes, in this order: one bad (open/escalating), one warn (stock/risk), one good (resolved/positive).',
+      minItems: 3, maxItems: 3,
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          tone: { type: 'string', enum: ['bad', 'warn', 'good'] },
+          label: { type: 'string', description: 'Short uppercase-style label, e.g. "Open / escalating".' },
+          text: { type: 'string', description: 'One tight sentence with concrete named examples.' },
+        },
+        required: ['tone', 'label', 'text'],
+      },
+    },
+    kpis: {
+      type: 'array',
+      description: 'Exactly three HEADLINE KPIs derived from the chats (beyond total groups/messages, which are added separately). e.g. accounts hit by stock, dispatch-chasing accounts, biggest open credit block.',
+      minItems: 3, maxItems: 3,
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          value: { type: 'string', description: 'Short value, e.g. "7", "6", "₹5.6L".' },
+          label: { type: 'string', description: 'Short label, e.g. "Accounts hit by Stock".' },
+          tone: { type: 'string', enum: ['', 'red', 'amber', 'green'] },
+        },
+        required: ['value', 'label', 'tone'],
+      },
+    },
     escalations: {
       type: 'array',
-      description: 'The most pressing situations to act on first, most severe first.',
+      description: 'The pressing open/at-risk items, most severe first. Only real ones from the chats.',
       items: {
-        type: 'object',
-        additionalProperties: false,
+        type: 'object', additionalProperties: false,
         properties: {
-          account: { type: 'string', description: 'Chat / dealer name.' },
-          severity: { type: 'string', enum: ['critical', 'high', 'open'] },
-          situation: { type: 'string', description: 'What happened, with a short in-chat quote if telling.' },
-          status: { type: 'string', description: 'Where it stands / whether it is closed.' },
+          account: { type: 'string', description: 'Account / group name exactly as it appears.' },
+          severity_class: { type: 'string', enum: ['Crit', 'High', 'Med', 'Good'] },
+          severity_label: { type: 'string', description: 'e.g. "Critical (2nd window)", "High", "Medium (resolved)".' },
+          issue: { type: 'string', description: 'What happened, with a short verbatim quote in "quotes" where telling. Use **bold**/*italic* sparingly.' },
         },
-        required: ['account', 'severity', 'situation', 'status'],
+        required: ['account', 'severity_class', 'severity_label', 'issue'],
       },
     },
-    unanswered: {
+    groups: {
       type: 'array',
-      description: 'Dealer messages left with no reply, a non-answer, or no closure in the window.',
+      description: 'One row per group that appears in the GROUP ACTIVITY table provided. Use the EXACT group name given. Do not invent groups or message counts (counts are added from data).',
       items: {
-        type: 'object',
-        additionalProperties: false,
+        type: 'object', additionalProperties: false,
         properties: {
-          chat: { type: 'string' },
-          detail: { type: 'string' },
+          group: { type: 'string', description: 'Exact group name from the provided activity table.' },
+          status_class: { type: 'string', enum: ['p-red', 'p-amber', 'p-green', 'p-grey'] },
+          status_label: { type: 'string', description: 'Short status, e.g. "Dispatch chase", "Stock enquiry", "Resolved", "Healthy".' },
+          concern: { type: 'string', description: 'One line: the key concern / activity this window, with a short quote if telling.' },
         },
-        required: ['chat', 'detail'],
+        required: ['group', 'status_class', 'status_label', 'concern'],
       },
     },
-    quality_notes: { type: 'string', description: 'Overall service-quality assessment (plain text): what was handled well, where the team was weak.' },
-    action_list: { type: 'array', items: { type: 'string' }, description: 'Prioritized, concrete actions to take, most important first.' },
+    concern_mix: {
+      type: 'array',
+      description: 'Issue categories ranked by number of ACCOUNTS affected (not message counts), most first.',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          label: { type: 'string', description: 'e.g. "Stock-out / discontinued / short".' },
+          count: { type: 'integer', description: 'Accounts affected.' },
+        },
+        required: ['label', 'count'],
+      },
+    },
+    actions_immediate: { type: 'array', items: { type: 'string' }, description: 'Concrete actions for THIS week, most important first. Use **bold** for the lead phrase.' },
+    actions_structural: { type: 'array', items: { type: 'string' }, description: 'Structural fixes (30–90 days). Use **bold** for the lead phrase.' },
   },
-  required: ['executive_summary', 'recurring_issues', 'escalations', 'unanswered', 'quality_notes', 'action_list'],
+  required: ['verdict_title', 'verdict', 'banner', 'kpis', 'escalations', 'groups', 'concern_mix', 'actions_immediate', 'actions_structural'],
 }
 
-const SYSTEM = `You are an operations analyst for D'Decor, a furnishings brand. You read captured WhatsApp chats between the D'Decor team and its dealers/backend support, and produce a crisp management report.
+const SYSTEM = `You are an operations analyst for D'Decor, an Indian furnishings brand. You read captured WhatsApp chats between the D'Decor team and its dealers/customers and produce a crisp management "Customer Chat Review" for leadership.
 
 Rules:
-- Base EVERYTHING strictly on the provided messages. Never invent accounts, PO numbers, quantities, or quotes. If the data is thin, say so briefly rather than padding.
-- "team" = the D'Decor side (outgoing / from_me), "dealer" = incoming.
-- Quote short, telling phrases verbatim where they sharpen a point.
-- Be concise and specific. Prefer concrete detail (names, PO numbers, mtr, dates as they appear) over generalities.
-- Rank escalations by real business impact: wrong material, repeat defects, short-cut quantities, account/credit blocks, and unanswered urgent requests are high-impact.
-- Return your analysis via the required structured schema only.`
+- Base EVERYTHING strictly on the provided messages. NEVER invent accounts, PO/order numbers, quantities, amounts, or quotes. If data is thin, say so plainly rather than padding.
+- "team" = the D'Decor side (ME / outgoing / from_me); "dealer/customer" = incoming.
+- Quote short, telling phrases VERBATIM (in "quotes") where they sharpen a point. Translate Hindi context to English but keep the quoted flavour.
+- Be concise, specific, and business-first. Prefer concrete detail (names, PO numbers, mtr/qty, dates, ₹ amounts as they appear) over generalities.
+- Rank by real business impact: wrong material, repeat defects, short/short-supplied quantities, discontinuations, account/credit blocks, and unanswered urgent dispatch requests are high-impact.
+- For the per-group rows: use the EXACT group names from the GROUP ACTIVITY table you are given, one row each. Choose a status colour that reflects the window (p-red = open/escalating, p-amber = risk/enquiry/pending, p-green = healthy/resolved, p-grey = quiet/no issue).
+- concern_mix counts ACCOUNTS affected per category, not messages.
+- Return your analysis via the required structured schema ONLY.`
 
-function renderSections(d) {
-  const sev = (s) => ({ critical: '🔴 Critical', high: '🟠 High', open: '🟠 Open' }[s] || esc(s))
-  const paras = (t) => String(t || '').split(/\n{2,}/).map((x) => `<p>${esc(x.trim())}</p>`).join('')
-  let h = `<h2>Executive Summary <span style="font-size:12px;color:#0a6;font-weight:600">· AI analysis</span></h2>${paras(d.executive_summary)}`
-  if (d.recurring_issues?.length) {
-    h += `<p><strong>Recurring issues this window:</strong></p><ol>${d.recurring_issues.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`
-  }
-  if (d.escalations?.length) {
-    h += `<h2>🔴 Critical Escalations (act first)</h2>
-<table><tr><th>#</th><th>Account</th><th>Situation</th><th>Status</th></tr>
-${d.escalations.map((e, i) => `<tr><td class="num">${i + 1}</td><td><strong>${esc(e.account)}</strong><br><span style="white-space:nowrap;font-weight:700">${sev(e.severity)}</span></td><td>${esc(e.situation)}</td><td>${esc(e.status)}</td></tr>`).join('')}
-</table>`
-  }
-  h += `<h2>⭐ Service Quality Assessment</h2>`
-  if (d.unanswered?.length) {
-    h += `<p><strong>Unanswered / poorly-handled watchlist:</strong></p>
-<table><tr><th>Chat</th><th>What happened</th></tr>
-${d.unanswered.map((u) => `<tr><td><strong>${esc(u.chat)}</strong></td><td>${esc(u.detail)}</td></tr>`).join('')}
-</table>`
-  }
-  if (d.quality_notes) h += paras(d.quality_notes)
-  if (d.action_list?.length) {
-    h += `<h2>Consolidated Action List</h2><ol>${d.action_list.map((a) => `<li>${esc(a)}</li>`).join('')}</ol>`
-  }
-  return h
-}
-
-// ids: undefined = all; [] = none; [..] scoped. days: null = all.
-async function analyze({ ids, days = null, generatedAt = Date.now() } = {}) {
+// stats.groupActivity: [{ name, msgs }] sorted desc (from SQL, authoritative counts)
+async function analyze({ ids, days = null, generatedAt = Date.now(), groupActivity = [] } = {}) {
   if (!isConfigured()) throw new Error('ANTHROPIC_API_KEY is not set on the server')
 
   const { text: transcript, messages, truncated } = await buildTranscript({ ids, days, cap: MAX_TRANSCRIPT_CHARS, generatedAt })
-  if (!messages) return { html: '<div class="note">No messages in the selected window to analyze.</div>' }
+  if (!messages) return { data: null, empty: true }
+
+  const activityTable = groupActivity.length
+    ? 'GROUP ACTIVITY (message counts — authoritative, use these exact names):\n' +
+      groupActivity.map((g) => `- ${g.name}: ${g.msgs} messages`).join('\n')
+    : ''
 
   const client = new Anthropic() // reads ANTHROPIC_API_KEY
   const stream = client.messages.stream({
@@ -109,7 +130,7 @@ async function analyze({ ids, days = null, generatedAt = Date.now() } = {}) {
     system: SYSTEM,
     messages: [{
       role: 'user',
-      content: `Analyze these captured WhatsApp chats and produce the report sections.${truncated ? ' (Transcript was truncated to the most recent messages within the size limit.)' : ''}\n\nTRANSCRIPT:\n${transcript}`,
+      content: `Analyze these captured WhatsApp chats and produce the Customer Chat Review sections.${truncated ? ' (Transcript was truncated to the most recent messages within the size limit.)' : ''}\n\n${activityTable}\n\nTRANSCRIPT:\n${transcript}`,
     }],
   })
   const msg = await stream.finalMessage()
@@ -118,8 +139,7 @@ async function analyze({ ids, days = null, generatedAt = Date.now() } = {}) {
   let data
   try { data = JSON.parse(textBlock.text) } catch { throw new Error('AI response was not valid JSON') }
 
-  const note = `<div class="note"><strong>AI analysis.</strong> The sections below were generated by Claude reading the captured chats${truncated ? ' (most recent messages within the size limit)' : ''}. Verify PO numbers, quantities, and quotes against source before acting.</div>`
-  return { html: note + renderSections(data), usage: msg.usage }
+  return { data, usage: msg.usage, truncated }
 }
 
 module.exports = { analyze, isConfigured }

@@ -20,6 +20,7 @@
     <nav class="nav" id="nav">
       <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
       <button data-view="reports"><span class="ico">📊</span> Reports</button>
+      <button data-view="emails"><span class="ico">✉</span> Email Reports</button>
       <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
       <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
       <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
@@ -103,6 +104,21 @@
       <div class="card" style="padding:0;overflow:hidden">
         <iframe id="reportFrame" title="WhatsApp Activity Report" style="width:100%;height:calc(100vh - 280px);min-height:420px;border:0;background:#fff;border-radius:14px;display:block"></iframe>
       </div>
+    </section>
+
+    <!-- EMAIL REPORTS -->
+    <section id="view-emails" class="view hide">
+      <div class="card" id="scheduleCard" style="margin-bottom:18px"></div>
+      <div class="card" style="margin-bottom:18px">
+        <h3>Add report recipient</h3>
+        <div class="inline-form">
+          <div class="field" style="flex:1"><label>Email address</label><input class="in" id="emailAddr" placeholder="name@company.com" /></div>
+          <div class="field" style="flex:1"><label>Label (optional)</label><input class="in" id="emailLabel" placeholder="e.g. Sales Head" /></div>
+          <button class="btn primary" id="addEmailBtn">＋ Add</button>
+        </div>
+        <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">The daily report is emailed to every <b>enabled</b> recipient. Toggle a recipient off to temporarily stop sending to them without removing them.</p>
+      </div>
+      <div class="card tablewrap"><table id="emailTable"></table></div>
     </section>
 
     <!-- SESSIONS -->

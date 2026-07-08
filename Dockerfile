@@ -11,6 +11,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 COPY src ./src
 COPY public ./public
 COPY scripts/export-chats.js ./scripts/export-chats.js
+COPY scripts/daily-report.js ./scripts/daily-report.js
 COPY automate.js ./automate.js
 
 ENV NODE_ENV=production

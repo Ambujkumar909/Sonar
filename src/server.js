@@ -20,6 +20,8 @@ const textlog = require('./textlog')
 const license = require('./license')
 const report = require('./report')
 const chatExport = require('./chatExport')
+const scheduler = require('./scheduler')
+const mailer = require('./mailer')
 const SessionManager = require('./sessionManager')
 
 const app = express()
@@ -53,6 +55,13 @@ const manager = new SessionManager((event, payload) => io.emit(event, payload))
 
 const ok = (res, data) => res.json({ ok: true, ...data })
 const bad = (res, msg, code = 400) => res.status(code).json({ ok: false, error: msg })
+// Report documents are self-contained (inline CSS + inline Chart.js). We scope a
+// permissive CSP to THESE responses only so the inline chart scripts run in the
+// iframe; the app's own global CSP (script-src 'self') stays strict.
+const sendReportHtml = (res, html) => {
+  res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:")
+  res.type('html').send(html)
+}
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next) // async route guard
 
 // ============================================================================
@@ -248,7 +257,7 @@ app.get('/api/report', wrap(async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${fn}"`)
     auth.audit(req, 'report.download')
   }
-  res.type('html').send(html)
+  sendReportHtml(res, html)
 }))
 
 // ---- raw chat data export (for offline analysis in Claude Code — no API) ----
@@ -281,9 +290,61 @@ app.get('/api/reports/:id', auth.requireUserAdmin, wrap(async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="whatsapp-report-${new Date(Number(r.created_at)).toISOString().slice(0, 10)}.html"`)
     auth.audit(req, 'report.download', String(r.id))
   }
-  res.type('html').send(r.html)
+  sendReportHtml(res, r.html)
 }))
 app.delete('/api/reports/:id', auth.requireUserAdmin, wrap(async (req, res) => { await store.deleteReport(Number(req.params.id)); auth.audit(req, 'report.delete', req.params.id); ok(res, {}) }))
+
+// ---- report email recipients + scheduler (admin-only) ----------------------
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+app.get('/api/report-emails', auth.requireUserAdmin, wrap(async (req, res) =>
+  ok(res, { emails: await store.listReportEmails(), schedule: scheduler.status() })))
+app.post('/api/report-emails', auth.requireUserAdmin, wrap(async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase()
+  const label = String(req.body.label || '').trim().slice(0, 120)
+  if (!EMAIL_RE.test(email)) return bad(res, 'Enter a valid email address')
+  const id = await store.addReportEmail(email, label, req.user.username)
+  auth.audit(req, 'report_email.add', email)
+  ok(res, { id })
+}))
+app.post('/api/report-emails/:id/toggle', auth.requireUserAdmin, wrap(async (req, res) => {
+  await store.setReportEmailEnabled(Number(req.params.id), !!req.body.enabled)
+  auth.audit(req, 'report_email.toggle', `${req.params.id}=${req.body.enabled ? 'on' : 'off'}`)
+  ok(res, {})
+}))
+app.delete('/api/report-emails/:id', auth.requireUserAdmin, wrap(async (req, res) => {
+  await store.deleteReportEmail(Number(req.params.id)); auth.audit(req, 'report_email.delete', req.params.id); ok(res, {})
+}))
+// Run the daily report now (generate + save + email) — for testing the pipeline.
+app.post('/api/report-emails/run-now', auth.requireUserAdmin, wrap(async (req, res) => {
+  auth.audit(req, 'report.run_now')
+  const r = await scheduler.runDaily({ by: req.user.username + ' (manual)' })
+  ok(res, r)
+}))
+// Send a fully-populated SAMPLE report — to test email delivery + formatting.
+// Optional body.to sends to one address; otherwise to all enabled recipients.
+app.post('/api/report-emails/send-test', auth.requireUserAdmin, wrap(async (req, res) => {
+  if (!mailer.isConfigured()) return bad(res, 'SMTP is not configured — set EMAIL_HOST/EMAIL_USER/EMAIL_PASS in .env', 400)
+  const one = String(req.body.to || '').trim().toLowerCase()
+  let to
+  if (one) { if (!EMAIL_RE.test(one)) return bad(res, 'Enter a valid test email'); to = [one] }
+  else { to = (await store.listEnabledReportEmails()).map((r) => r.email); if (!to.length) return bad(res, 'No enabled recipients — add one, or type a test address') }
+  const sample = require('./sampleReport').build()
+  auth.audit(req, 'report.send_test', to.join(','))
+  try {
+    await mailer.sendReport({
+      to, subject: "D'Decor — Customer Chat Review (SAMPLE / test email)",
+      bodyHtml: `<div style="font-family:'Segoe UI',Arial,sans-serif"><p>This is a <b>sample test email</b> from Sonar to confirm delivery and formatting. The full sample report (with charts) is attached — open it in a browser.</p></div>`,
+      attachmentHtml: sample.html, filename: 'sample-customer-chat-review.html',
+    })
+    ok(res, { emailed: to.length, to })
+  } catch (e) { bad(res, 'Send failed: ' + e.message, 502) }
+}))
+// Verify SMTP connectivity without sending.
+app.get('/api/report-emails/smtp-check', auth.requireUserAdmin, wrap(async (req, res) => {
+  if (!mailer.isConfigured()) return ok(res, { configured: false })
+  try { await mailer.verify(); ok(res, { configured: true, ok: true }) }
+  catch (e) { ok(res, { configured: true, ok: false, error: e.message }) }
+}))
 
 // ---- analytics & events ----------------------------------------------------
 app.get('/api/stats', wrap(async (req, res) => ok(res, { stats: await store.stats(await idsFor(req)) })))
@@ -442,6 +503,7 @@ io.on('connection', async (socket) => {
       catch (e) { console.error('retention sweep failed:', e?.message || e) }
     }
     sweep(); setInterval(sweep, 24 * 3600 * 1000)
+    scheduler.start() // daily report at REPORT_HOUR (REPORT_TZ)
   })
 })().catch((e) => { console.error('BOOT FAILED:', e); process.exit(1) })
 
