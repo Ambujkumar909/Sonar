@@ -75,10 +75,32 @@ module.exports = {
   },
 
   // Daily report scheduler — generates + saves + emails the last-24h report.
+  // Supports MULTIPLE times per day via REPORT_TIMES="14:00,19:00" (24h clock).
+  // Falls back to the single REPORT_HOUR/REPORT_MINUTE if REPORT_TIMES is unset.
+  // Each firing covers the last 24h RELATIVE to its run time.
   REPORT: {
     enabled: process.env.REPORT_SCHEDULE !== '0', // on by default; set REPORT_SCHEDULE=0 to disable
-    hour: Number.isFinite(Number(process.env.REPORT_HOUR)) ? Number(process.env.REPORT_HOUR) : 19, // 24h clock
-    minute: Number(process.env.REPORT_MINUTE) || 0,
-    tz: process.env.REPORT_TZ || 'Asia/Kolkata', // 7pm is computed in THIS timezone, not the server's
+    times: parseReportTimes(),
+    tz: process.env.REPORT_TZ || 'Asia/Kolkata', // times are computed in THIS timezone, not the server's
   },
+}
+
+function parseReportTimes() {
+  const out = []
+  const raw = (process.env.REPORT_TIMES || '').trim()
+  if (raw) {
+    for (const part of raw.split(',')) {
+      const m = part.trim().match(/^(\d{1,2}):(\d{2})$/)
+      if (m) { const h = +m[1], mi = +m[2]; if (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) out.push({ h, m: mi }) }
+    }
+  }
+  if (!out.length) {
+    const h = Number.isFinite(Number(process.env.REPORT_HOUR)) ? Number(process.env.REPORT_HOUR) : 19
+    const mi = Number(process.env.REPORT_MINUTE) || 0
+    out.push({ h, m: mi })
+  }
+  // de-dupe + sort by time of day
+  const seen = new Set()
+  return out.filter((t) => { const k = t.h * 60 + t.m; if (seen.has(k)) return false; seen.add(k); return true })
+    .sort((a, b) => (a.h * 60 + a.m) - (b.h * 60 + b.m))
 }

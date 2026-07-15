@@ -282,7 +282,7 @@ async function renderEmails() {
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div><h3 style="margin:0">Daily report schedule</h3>
         <div style="font-size:13px;color:var(--ink-soft);margin-top:4px">
-          ${s.enabled ? `Runs daily at <b>${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}</b> (${esc(s.tz)}) · covers the last 24 hours · next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b> (REPORT_SCHEDULE=0)'}
+          ${s.enabled ? `Runs daily at <b>${esc(s.timesLabel || '')}</b> (${esc(s.tz)}) · each run covers the last 24 hours · next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b> (REPORT_SCHEDULE=0)'}
         </div>
         <div style="margin-top:8px">${smtp}</div>
       </div>

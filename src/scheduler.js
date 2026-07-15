@@ -29,14 +29,18 @@ function epochForWallclock(tz, y, mo, d, h, mi) {
   return guess
 }
 function nextRunAt(now = Date.now()) {
-  const { tz, hour, minute } = cfg.REPORT
-  const today = partsInTz(tz, now)
-  let target = epochForWallclock(tz, today.y, today.mo, today.d, hour, minute)
-  if (target <= now + 1000) { // already past today -> schedule for tomorrow
-    const t = partsInTz(tz, now + 24 * 3600 * 1000)
-    target = epochForWallclock(tz, t.y, t.mo, t.d, hour, minute)
+  const { tz, times } = cfg.REPORT
+  let best = Infinity
+  for (const { h, m } of times) {
+    const today = partsInTz(tz, now)
+    let target = epochForWallclock(tz, today.y, today.mo, today.d, h, m)
+    if (target <= now + 1000) { // already past today for this time -> tomorrow
+      const t = partsInTz(tz, now + 24 * 3600 * 1000)
+      target = epochForWallclock(tz, t.y, t.mo, t.d, h, m)
+    }
+    if (target < best) best = target
   }
-  return target
+  return best
 }
 const fmtInTz = (epoch) => new Date(epoch).toLocaleString('en-IN', { timeZone: cfg.REPORT.tz, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
 
@@ -96,10 +100,13 @@ function start() {
   scheduleNext()
 }
 function stop() { if (timer) clearTimeout(timer); timer = null }
+const timesLabel = () => cfg.REPORT.times.map((t) => `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}`).join(', ')
 function status() {
   return {
     enabled: cfg.REPORT.enabled,
-    hour: cfg.REPORT.hour, minute: cfg.REPORT.minute, tz: cfg.REPORT.tz,
+    times: cfg.REPORT.times.map((t) => `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}`),
+    timesLabel: timesLabel(),
+    tz: cfg.REPORT.tz,
     nextRun: cfg.REPORT.enabled ? nextRunAt() : null,
     nextRunLabel: cfg.REPORT.enabled ? fmtInTz(nextRunAt()) : null,
     smtpConfigured: mailer.isConfigured(),
