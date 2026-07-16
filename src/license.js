@@ -36,6 +36,21 @@ function machineFingerprint() {
 }
 function machineInfo() { return { host: os.hostname(), platform: os.platform(), arch: os.arch(), cpus: os.cpus().length } }
 
+// Stable per-DEPLOYMENT fingerprint. Hardware fingerprints (MAC/hostname) are
+// unstable in Docker — the MAC changes on every container restart, which would
+// silently invalidate the encrypted state and drop the license. Instead we bind
+// to a random machine-id persisted once in the DB (or LICENSE_MACHINE_ID if set),
+// so an activated license survives restarts and rebuilds on the same database.
+const MID_KEY = 'license:mid'
+async function resolveFingerprint() {
+  const envId = (process.env.LICENSE_MACHINE_ID || '').trim()
+  if (envId) return crypto.createHash('sha256').update('env::' + envId).digest('hex')
+  let mid = null
+  try { mid = await store.kvGet(MID_KEY) } catch { mid = null }
+  if (!mid) { mid = crypto.randomBytes(16).toString('hex'); try { await store.kvSet(MID_KEY, mid) } catch {} }
+  return crypto.createHash('sha256').update('mid::' + mid).digest('hex')
+}
+
 function stateKey(fp) { return crypto.scryptSync(fp + '::' + APP_SECRET, 'sonar-license-salt', 32) }
 async function saveState(state, fp) {
   const iv = crypto.randomBytes(12)
@@ -75,6 +90,8 @@ class License {
   async init(manager) {
     this.manager = manager
     if (!this.enabled()) { this.status = 'disabled'; return }
+    // Resolve the stable per-deployment fingerprint (survives Docker restarts).
+    this.fp = await resolveFingerprint()
     // Always load the persisted monotonic clock first (anti-rollback survives restarts).
     const st = await loadState(this.fp)
     if (st) this.lastSeen = Math.max(this.lastSeen, st.lastSeen || 0)
