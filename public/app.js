@@ -277,12 +277,12 @@ async function renderEmails() {
   const s = r.schedule || {}
   const smtp = s.smtpConfigured
     ? `<span class="pill" style="font-size:11.5px"><span class="dot ok"></span>SMTP ready${s.from ? ' · ' + esc(s.from) : ''}</span>`
-    : `<span class="pill" style="font-size:11.5px"><span class="dot bad"></span>SMTP not configured — set EMAIL_* in .env</span>`
+    : `<span class="pill" style="font-size:11.5px"><span class="dot bad"></span>Email not configured — contact your administrator</span>`
   $('#scheduleCard').innerHTML = `
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div><h3 style="margin:0">Daily report schedule</h3>
         <div style="font-size:13px;color:var(--ink-soft);margin-top:4px">
-          ${s.enabled ? `Runs daily at <b>${esc(s.timesLabel || '')}</b> (${esc(s.tz)}) · each run covers the last 24 hours · next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b> (REPORT_SCHEDULE=0)'}
+          ${s.enabled ? `Runs daily at <b>${esc(s.timesLabel || '')}</b> (${esc(s.tz)}) · each run covers the last 24 hours · next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b>.'}
         </div>
         <div style="margin-top:8px">${smtp}</div>
       </div>
