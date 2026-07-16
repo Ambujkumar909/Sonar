@@ -21,6 +21,7 @@
       <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
       <button data-view="reports"><span class="ico">📊</span> Reports</button>
       <button data-view="emails"><span class="ico">✉</span> Email Reports</button>
+      <button data-view="scheduler"><span class="ico">⏰</span> Scheduler</button>
       <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
       <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
       <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
@@ -119,6 +120,45 @@
         <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">The daily report is emailed to every <b>enabled</b> recipient. Toggle a recipient off to temporarily stop sending to them without removing them.</p>
       </div>
       <div class="card tablewrap"><table id="emailTable"></table></div>
+    </section>
+
+    <!-- SCHEDULER -->
+    <section id="view-scheduler" class="view hide">
+      <div class="card" id="schedNextCard" style="margin-bottom:18px"></div>
+      <div class="card">
+        <h3>Report schedule</h3>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin:6px 0 16px">Configure when the report runs and how much it covers. Saved to the database — no <b>.env</b> edits, applies immediately.</p>
+        <div class="inline-form" style="align-items:flex-end;flex-wrap:wrap;gap:16px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="schedEnabled" /> <b>Enabled</b></label>
+          <div class="field"><label>Run at time(s) — 24h, comma-separated</label><input class="in" id="schedTimes" placeholder="14:00, 19:00" /></div>
+        </div>
+        <div class="inline-form" style="align-items:flex-end;flex-wrap:wrap;gap:16px;margin-top:14px">
+          <div class="field"><label>Frequency</label>
+            <select class="in" id="schedFreq">
+              <option value="1">Every day</option>
+              <option value="3">Every 3 days</option>
+              <option value="7">Weekly</option>
+              <option value="30">Monthly (30 days)</option>
+              <option value="365">Yearly</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div class="field" id="schedFreqCustomWrap" style="display:none"><label>…every N days</label><input class="in" id="schedFreqCustom" type="number" min="1" max="3650" placeholder="e.g. 10" /></div>
+          <div class="field"><label>Each report covers</label>
+            <select class="in" id="schedWindow">
+              <option value="1">Last 24 hours</option>
+              <option value="3">Last 3 days</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="365">Last year</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div class="field" id="schedWindowCustomWrap" style="display:none"><label>…last N days</label><input class="in" id="schedWindowCustom" type="number" min="1" max="3650" placeholder="e.g. 14" /></div>
+          <div class="field"><label>Timezone</label><input class="in" id="schedTz" placeholder="Asia/Kolkata" /></div>
+        </div>
+        <div style="margin-top:18px"><button class="btn primary" id="saveSchedBtn">Save schedule</button></div>
+      </div>
     </section>
 
     <!-- SESSIONS -->

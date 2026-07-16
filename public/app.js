@@ -34,12 +34,12 @@ const urlTheme = new URLSearchParams(location.search).get('theme')
 applyTheme(urlTheme || localStorage.getItem('sonar-theme') || 'light')
 
 /* ---------- navigation ---------- */
-const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Reports', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
+const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Reports', scheduler: 'Scheduler', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
 function go(view) {
   if (!TITLES[view]) view = 'dashboard'
   // route guards (defence in depth — API enforces too)
   if (view === 'audit' && state.me && state.me.role !== 'super_admin') view = 'dashboard'
-  if ((view === 'users' || view === 'license' || view === 'emails') && !(state.me && (state.me.role === 'admin' || state.me.role === 'super_admin'))) view = 'dashboard'
+  if ((view === 'users' || view === 'license' || view === 'emails' || view === 'scheduler') && !(state.me && (state.me.role === 'admin' || state.me.role === 'super_admin'))) view = 'dashboard'
   state.view = view
   $$('.view').forEach(v => v.classList.add('hide'))
   $('#view-' + view).classList.remove('hide')
@@ -118,7 +118,7 @@ function refreshChrome() {
    RENDER ROUTER
    ============================================================= */
 function render(view) {
-  ({ dashboard: renderDashboard, reports: renderReports, emails: renderEmails, sessions: renderSessions, chats: renderChats,
+  ({ dashboard: renderDashboard, reports: renderReports, emails: renderEmails, scheduler: renderScheduler, sessions: renderSessions, chats: renderChats,
      watchlist: renderWatchlist, keywords: renderKeywords, health: renderHealth,
      audit: renderAudit, license: renderLicense, users: renderUsers, files: renderFiles, about: renderAbout }[view] || (() => {}))()
   requestAnimationFrame(() => stagger($('#view-' + view)))
@@ -338,6 +338,56 @@ async function sendTestReport() {
     else toast((r && r.error) || 'Send failed', 'err')
   } catch { toast('Send failed', 'err') }
   finally { if (btn) { btn.disabled = false; btn.textContent = '✉ Send sample report' } }
+}
+
+/* ---------- SCHEDULER ---------- */
+const SCHED_PRESETS = ['1', '3', '7', '30', '365']
+function setSelectCustom(selId, wrapId, customId, val) {
+  const sel = $(selId), v = String(val)
+  if (SCHED_PRESETS.includes(v)) { sel.value = v; $(wrapId).style.display = 'none' }
+  else { sel.value = 'custom'; $(wrapId).style.display = ''; $(customId).value = v }
+}
+function readSelectCustom(selId, customId) {
+  const v = $(selId).value
+  const n = v === 'custom' ? Number($(customId).value) : Number(v)
+  return Math.min(3650, Math.max(1, Math.floor(n || 1)))
+}
+async function renderScheduler() {
+  const r = await api('/schedule'); if (!r || !r.ok) return
+  const c = r.config, s = r.status
+  $('#schedEnabled').checked = !!c.enabled
+  $('#schedTimes').value = (c.times || []).join(', ')
+  setSelectCustom('#schedFreq', '#schedFreqCustomWrap', '#schedFreqCustom', c.intervalDays)
+  setSelectCustom('#schedWindow', '#schedWindowCustomWrap', '#schedWindowCustom', c.windowDays)
+  $('#schedTz').value = c.tz || 'Asia/Kolkata'
+  $('#schedFreq').onchange = () => { $('#schedFreqCustomWrap').style.display = $('#schedFreq').value === 'custom' ? '' : 'none' }
+  $('#schedWindow').onchange = () => { $('#schedWindowCustomWrap').style.display = $('#schedWindow').value === 'custom' ? '' : 'none' }
+  const freqLabel = { 1: 'every day', 3: 'every 3 days', 7: 'weekly', 30: 'monthly', 365: 'yearly' }[c.intervalDays] || `every ${c.intervalDays} days`
+  $('#schedNextCard').innerHTML = `<h3 style="margin:0">Next run</h3>
+    <div style="font-size:13px;color:var(--ink-soft);margin-top:6px">
+      ${s.enabled ? `<b>${esc(s.nextRunLabel || '—')}</b> (${esc(s.tz)}) · runs <b>${esc(freqLabel)}</b> at <b>${esc((c.times || []).join(', '))}</b> · each report covers the last <b>${c.windowDays}</b> day(s)` : 'Scheduler is <b>disabled</b>.'}
+      <span style="margin-left:10px">${s.smtpConfigured ? '<span class="pill" style="font-size:11px"><span class="dot ok"></span>SMTP ready</span>' : '<span class="pill" style="font-size:11px"><span class="dot bad"></span>SMTP off</span>'}</span>
+    </div>`
+  $('#saveSchedBtn').onclick = saveSchedule
+}
+async function saveSchedule() {
+  const times = $('#schedTimes').value.split(',').map(t => t.trim()).filter(Boolean)
+  if (!times.length) return toast('Add at least one run time (HH:MM)', 'err')
+  if (!times.every(t => /^\d{1,2}:\d{2}$/.test(t))) return toast('Times must be HH:MM (e.g. 14:00)', 'err')
+  const payload = {
+    enabled: $('#schedEnabled').checked,
+    times,
+    intervalDays: readSelectCustom('#schedFreq', '#schedFreqCustom'),
+    windowDays: readSelectCustom('#schedWindow', '#schedWindowCustom'),
+    tz: $('#schedTz').value.trim() || 'Asia/Kolkata',
+  }
+  const btn = $('#saveSchedBtn'); btn.disabled = true; btn.textContent = 'Saving…'
+  try {
+    const r = await post('/schedule', payload)
+    if (r && r.ok) { toast('Schedule saved · next: ' + (r.status.nextRunLabel || '—')); renderScheduler() }
+    else toast((r && r.error) || 'Save failed', 'err')
+  } catch { toast('Save failed', 'err') }
+  finally { btn.disabled = false; btn.textContent = 'Save schedule' }
 }
 
 /* ---------- SESSIONS ---------- */
@@ -808,8 +858,8 @@ async function renderLicense() {
     </div>
     <div class="k" style="margin-top:12px;color:var(--ink-faint);font-size:12px">Machine fingerprint</div>
     <div style="font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;color:var(--ink-soft)">${esc(l.fingerprint || '')}</div>`
-  // activation is super_admin only
-  $('#licenseActivateCard').style.display = isSuper() ? '' : 'none'
+  // activation is available to admin + super_admin
+  $('#licenseActivateCard').style.display = isAdminish() ? '' : 'none'
 }
 function tickCountdown() {
   const el = $('#licenseCountdown'); if (!el) return
@@ -903,6 +953,7 @@ function showUser(me) {
     if (b.dataset.view === 'users') b.style.display = isAdminish() ? '' : 'none'
     if (b.dataset.view === 'license') b.style.display = isAdminish() ? '' : 'none' // admin + super see countdown
     if (b.dataset.view === 'emails') b.style.display = isAdminish() ? '' : 'none' // report recipients → admin only
+    if (b.dataset.view === 'scheduler') b.style.display = isAdminish() ? '' : 'none' // schedule config → admin only
   })
 }
 /* profile popover */

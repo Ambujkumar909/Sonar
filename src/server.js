@@ -346,6 +346,26 @@ app.get('/api/report-emails/smtp-check', auth.requireUserAdmin, wrap(async (req,
   catch (e) { ok(res, { configured: true, ok: false, error: e.message }) }
 }))
 
+// ---- report SCHEDULE (DB-configurable; admin/super) ------------------------
+app.get('/api/schedule', auth.requireUserAdmin, wrap(async (req, res) =>
+  ok(res, { config: scheduler.getConfig(), status: scheduler.status() })))
+app.post('/api/schedule', auth.requireUserAdmin, wrap(async (req, res) => {
+  const b = req.body || {}
+  const patch = {}
+  if (typeof b.enabled === 'boolean') patch.enabled = b.enabled
+  if (Array.isArray(b.times)) patch.times = b.times
+  if (b.intervalDays != null) patch.intervalDays = Number(b.intervalDays)
+  if (b.windowDays != null) patch.windowDays = Number(b.windowDays)
+  if (typeof b.tz === 'string' && b.tz.trim()) {
+    try { new Intl.DateTimeFormat('en-US', { timeZone: b.tz.trim() }); patch.tz = b.tz.trim() }
+    catch { return bad(res, 'Invalid timezone') }
+  }
+  if (Array.isArray(patch.times) && patch.times.length === 0) return bad(res, 'Add at least one run time (HH:MM)')
+  const cfg2 = await scheduler.save(patch, req.user.username)
+  auth.audit(req, 'schedule.update', '', JSON.stringify(scheduler.getConfig()))
+  ok(res, { config: scheduler.getConfig(), status: scheduler.status() })
+}))
+
 // ---- analytics & events ----------------------------------------------------
 app.get('/api/stats', wrap(async (req, res) => ok(res, { stats: await store.stats(await idsFor(req)) })))
 app.get('/api/analytics', wrap(async (req, res) => {
@@ -362,12 +382,12 @@ app.get('/api/license/status', (req, res) => {
   if (!auth.isAdminish(req.user.role)) { delete l.machine; delete l.fingerprint }
   ok(res, { license: l })
 })
-app.post('/api/license/activate', auth.requireSuperAdmin, wrap(async (req, res) => {
+app.post('/api/license/activate', auth.requireUserAdmin, wrap(async (req, res) => {
   const r = await license.activate(req.body?.key || '')
   auth.audit(req, 'license.activate', '', r.ok ? r.status : r.error)
   r.ok ? ok(res, { status: r.status }) : bad(res, r.error)
 }))
-app.post('/api/license/refresh', auth.requireSuperAdmin, wrap(async (req, res) => { await license.heartbeat(); ok(res, { license: license.publicStatus() }) }))
+app.post('/api/license/refresh', auth.requireUserAdmin, wrap(async (req, res) => { await license.heartbeat(); ok(res, { license: license.publicStatus() }) }))
 
 // ---- audit (SUPER ADMIN ONLY) ----------------------------------------------
 const stripTokens = (rows) => rows.map(({ token, ...rest }) => rest)
@@ -503,7 +523,7 @@ io.on('connection', async (socket) => {
       catch (e) { console.error('retention sweep failed:', e?.message || e) }
     }
     sweep(); setInterval(sweep, 24 * 3600 * 1000)
-    scheduler.start() // daily report at REPORT_HOUR (REPORT_TZ)
+    scheduler.start().catch((e) => console.error('scheduler start failed:', e?.message || e)) // DB-configurable report schedule
   })
 })().catch((e) => { console.error('BOOT FAILED:', e); process.exit(1) })
 
