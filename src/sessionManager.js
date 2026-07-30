@@ -11,6 +11,17 @@ const baileys = require('@whiskeysockets/baileys')
 const makeWASocket = baileys.default
 const { Browsers } = baileys
 
+// WhatsApp bumps its Web protocol version regularly; connecting with a stale
+// version gets the stream rejected (405) BEFORE a QR is ever issued. Fetch the
+// current version once and pass it to every socket so handshakes are accepted.
+let _waVersion // undefined = not tried; null = failed; [..] = version
+async function getWaVersion() {
+  if (_waVersion !== undefined) return _waVersion
+  try { const { version } = await baileys.fetchLatestBaileysVersion(); _waVersion = version }
+  catch { _waVersion = null }
+  return _waVersion
+}
+
 const cfg = require('./config')
 const store = require('./store')
 const textlog = require('./textlog')
@@ -215,8 +226,10 @@ class SessionManager {
       const { state, saveCreds } = await usePostgresAuthState(id) // creds/keys in Postgres
       s.saveCreds = saveCreds
 
+      const version = await getWaVersion() // current WA Web version (fixes 405 stale-version rejects)
       const sock = makeWASocket({
         auth: state,
+        ...(version ? { version } : {}),
         logger: SILENT,
         browser: Browsers ? Browsers.appropriate('Desktop') : ['Sonar', 'Chrome', '121.0'],
         markOnlineOnConnect: cfg.MARK_ONLINE,     // stay invisible
