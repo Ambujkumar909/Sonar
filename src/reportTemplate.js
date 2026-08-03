@@ -90,14 +90,22 @@ footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:30px}
 @media(max-width:1050px){.kpis{grid-template-columns:repeat(3,1fr)}.banner{flex-direction:column}.c8,.c6,.c5,.c7,.c4{grid-column:span 12}.recos{grid-template-columns:1fr}}
 `
 
+// Keep y-axis labels short so one long account name can't eat the plot area.
+const clipLabel = (s, n = 30) => { s = String(s ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s }
+
 function hbarConfig(labels, data, colors, axisTitle, stepSize) {
   return {
     type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
+    data: { labels: labels.map((l) => clipLabel(l)), datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false,
       plugins: { legend: { display: false } },
-      scales: { x: { beginAtZero: true, title: { display: true, text: axisTitle }, ...(stepSize ? { ticks: { stepSize } } : {}) } },
+      scales: {
+        // precision:0 — these are counts; never show fractional ticks (e.g. "0.5 messages")
+        x: { beginAtZero: true, title: { display: true, text: axisTitle }, ticks: { precision: 0, ...(stepSize ? { stepSize } : {}) } },
+        // autoSkip:false — every bar keeps its label (an unlabelled bar is meaningless)
+        y: { ticks: { autoSkip: false, font: { size: 11 } } },
+      },
     },
   }
 }
@@ -147,11 +155,11 @@ function renderReport(d) {
 
   h += `<div class="grid">`
 
-  // ---- Activity by Account chart ----
-  h += `<div class="card c8">
+  // ---- Activity by Account chart ---- (full width when the paired chart is absent)
+  h += `<div class="card ${escChart ? 'c8' : 'c12'}">
     <h3>Activity by Account (messages${d.windowShort ? ', ' + esc(d.windowShort) : ''})</h3>
     <div class="note">${esc(d.byAccountNote || 'Message volume per monitored group this window.')}</div>
-    ${byAcct ? '<div class="chartbox"><canvas id="byacct"></canvas></div>' : '<div class="nodata">No data.</div>'}
+    ${byAcct ? `<div class="chartbox" style="height:${Math.max(320, topGroups.length * 26 + 60)}px"><canvas id="byacct"></canvas></div>` : '<div class="nodata">No data.</div>'}
   </div>`
 
   // ---- Escalations-by-category chart ----
@@ -165,9 +173,12 @@ function renderReport(d) {
 
   // ---- Key Escalations table (4 categories) ----
   if (hasAI && (d.escalations || []).length) {
+    // Any row with an unrecognised category falls into "other" — never dropped.
+    const escKeys = new Set(ESC_CATS.map((c) => c.key))
+    const escRows = d.escalations.map((e) => (escKeys.has(e.category) ? e : { ...e, category: 'other' }))
     let body = ''
     for (const cat of ESC_CATS) {
-      const rows = d.escalations.filter((e) => e.category === cat.key)
+      const rows = escRows.filter((e) => e.category === cat.key)
       if (!rows.length) continue
       body += `<tr class="catrow ${cat.cls}"><td colspan="3">${esc(cat.title)}</td></tr>`
       body += rows.map((e) => `<tr><td><span class="pill ${sevPill(e.severity)}">${esc(e.severity)}</span></td><td class="acc">${esc(e.account)}</td><td>${md(e.issue)}</td></tr>`).join('')
@@ -181,14 +192,17 @@ function renderReport(d) {
 
   // ---- Opportunities table (5 categories) ----
   if (hasAI && (d.opportunities || []).length) {
+    // Unrecognised category -> "convert" bucket, so no opportunity is ever dropped.
+    const oppKeys = new Set(OPP_CATS.map((c) => c.key))
+    const oppRows = d.opportunities.map((o) => (oppKeys.has(o.category) ? o : { ...o, category: 'convert' }))
     let body = ''
     for (const cat of OPP_CATS) {
-      const rows = d.opportunities.filter((o) => o.category === cat.key)
+      const rows = oppRows.filter((o) => o.category === cat.key)
       if (!rows.length) continue
       body += `<tr class="catrow c-opp"><td colspan="3">${esc(cat.title)}</td></tr>`
       body += rows.map((o) => `<tr><td><span class="pill p-green">${esc(o.value)}</span></td><td class="acc">${esc(o.account)}</td><td>${md(o.signal)}</td></tr>`).join('')
     }
-    h += `<div class="card opp c8">
+    h += `<div class="card opp ${oppChart ? 'c8' : 'c12'}">
       <h3>⭐ Opportunities to Win — by Category</h3>
       <div class="note">Winnable demand surfacing in chat. Inferential — an enquiry is not a booked order; convert &amp; confirm against ERP. Quotes verbatim.</div>
       <table><thead><tr><th style="width:120px">Value</th><th style="width:200px">Account</th><th>Signal (verbatim)</th></tr></thead><tbody>${body}</tbody></table>
