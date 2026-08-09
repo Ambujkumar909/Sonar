@@ -86,8 +86,47 @@ td.acc{font-weight:600;color:#33414f;white-space:nowrap}
 .recos .fix h4{color:var(--accent)}.recos .struct h4{color:var(--blue)}.recos .win h4{color:#177245}
 .ainote{background:#eef6fb;border:1px solid #bcd9ea;border-radius:8px;padding:12px 16px;font-size:12.5px;color:#234b5e;margin:6px 0 18px}
 .nodata{color:#98a2b3;font-size:13px;padding:24px 0}
+.tw{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:30px}
 @media(max-width:1050px){.kpis{grid-template-columns:repeat(3,1fr)}.banner{flex-direction:column}.c8,.c6,.c5,.c7,.c4{grid-column:span 12}.recos{grid-template-columns:1fr}}
+
+/* ---- phones ---- the report is read inside a ~360px iframe, so anything
+   built on fixed column widths has to be re-laid-out, not just shrunk. */
+@media(max-width:760px){
+  header{padding:16px 14px}
+  header h1{font-size:17px;line-height:1.3}
+  header .sub{font-size:12px}
+  header .tag{font-size:11px;padding:3px 10px;margin-top:8px}
+  .wrap{padding:14px 12px 36px}
+  .grid{gap:12px}
+  .banner{gap:8px;margin:4px 0 16px}
+  .banner .b{font-size:12.5px;padding:10px 12px}
+  .kpis{grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+  .kpi{padding:12px 10px}
+  .kpi .v{font-size:21px}
+  .kpi .l{font-size:10px}
+  .card{padding:14px 12px;border-radius:8px}
+  .card h3{font-size:13.5px}
+  .card .note{font-size:11px}
+  .chartbox.sm{height:250px}
+  .ainote{padding:10px 12px;font-size:12px}
+  /* Tables stack into per-row cards: name + pill on one line, the verbatim
+     text full-width underneath. A 3–4 column table is unreadable at 360px. */
+  .rt thead{display:none}
+  .rt,.rt tbody{display:block;width:100%}
+  .rt tr{display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;padding:9px 2px;border-bottom:1px solid #eef0f3}
+  .rt td{display:block;border:0;padding:0;overflow-wrap:anywhere}
+  .rt tr.catrow{display:block;padding:0}
+  .rt tr.catrow td{display:block;width:100%;padding:7px 9px}
+  .rt td.acc,.rt td.nm{order:1;flex:1 1 50%;min-width:0;white-space:normal;font-size:12.5px;font-weight:700;color:var(--navy)}
+  .rt td.msgs{order:2;flex:0 0 auto;font-size:11px;color:var(--muted)}
+  .rt td.msgs:before{content:"· "}
+  .rt td.pc{order:3;flex:0 0 auto;margin-left:auto}
+  .rt td.tx{order:4;flex:1 0 100%;font-size:12.5px;color:#404c5a}
+  .recos{font-size:12.5px;gap:4px 0}
+  .recos li{margin-left:16px}
+  footer{font-size:11px;margin-top:22px}
+}
 `
 
 // Keep y-axis labels short so one long account name can't eat the plot area.
@@ -181,12 +220,12 @@ function renderReport(d) {
       const rows = escRows.filter((e) => e.category === cat.key)
       if (!rows.length) continue
       body += `<tr class="catrow ${cat.cls}"><td colspan="3">${esc(cat.title)}</td></tr>`
-      body += rows.map((e) => `<tr><td><span class="pill ${sevPill(e.severity)}">${esc(e.severity)}</span></td><td class="acc">${esc(e.account)}</td><td>${md(e.issue)}</td></tr>`).join('')
+      body += rows.map((e) => `<tr><td class="pc"><span class="pill ${sevPill(e.severity)}">${esc(e.severity)}</span></td><td class="acc">${esc(e.account)}</td><td class="tx">${md(e.issue)}</td></tr>`).join('')
     }
     h += `<div class="card c12">
       <h3>Key Escalations / Open Items — by Category</h3>
       <div class="note">Four parts: Stock missing · Dispatch · Quality · All other. Quotes verbatim (Hindi context translated).</div>
-      <table><thead><tr><th style="width:90px">Severity</th><th style="width:210px">Account</th><th>Issue (verbatim)</th></tr></thead><tbody>${body}</tbody></table>
+      <div class="tw"><table class="rt"><thead><tr><th style="width:90px">Severity</th><th style="width:210px">Account</th><th>Issue (verbatim)</th></tr></thead><tbody>${body}</tbody></table></div>
     </div>`
   }
 
@@ -200,12 +239,12 @@ function renderReport(d) {
       const rows = oppRows.filter((o) => o.category === cat.key)
       if (!rows.length) continue
       body += `<tr class="catrow c-opp"><td colspan="3">${esc(cat.title)}</td></tr>`
-      body += rows.map((o) => `<tr><td><span class="pill p-green">${esc(o.value)}</span></td><td class="acc">${esc(o.account)}</td><td>${md(o.signal)}</td></tr>`).join('')
+      body += rows.map((o) => `<tr><td class="pc"><span class="pill p-green">${esc(o.value)}</span></td><td class="acc">${esc(o.account)}</td><td class="tx">${md(o.signal)}</td></tr>`).join('')
     }
     h += `<div class="card opp ${oppChart ? 'c8' : 'c12'}">
       <h3>⭐ Opportunities to Win — by Category</h3>
       <div class="note">Winnable demand surfacing in chat. Inferential — an enquiry is not a booked order; convert &amp; confirm against ERP. Quotes verbatim.</div>
-      <table><thead><tr><th style="width:120px">Value</th><th style="width:200px">Account</th><th>Signal (verbatim)</th></tr></thead><tbody>${body}</tbody></table>
+      <div class="tw"><table class="rt"><thead><tr><th style="width:120px">Value</th><th style="width:200px">Account</th><th>Signal (verbatim)</th></tr></thead><tbody>${body}</tbody></table></div>
     </div>`
     if (oppChart) {
       h += `<div class="card opp c4">
@@ -220,11 +259,11 @@ function renderReport(d) {
   if (groups.length) {
     h += `<div class="card c12">
       <h3>All Groups — Status &amp; Key Concern${d.windowShort ? ' (' + esc(d.windowShort) + ')' : ''}</h3>
-      <table><thead><tr><th>Group</th><th>Msgs</th><th>Status</th><th>Key concern / opportunity this window</th></tr></thead>
+      <div class="tw"><table class="rt"><thead><tr><th>Group</th><th>Msgs</th><th>Status</th><th>Key concern / opportunity this window</th></tr></thead>
       <tbody>${groups.map((g) => {
       const cls = ['p-red', 'p-amber', 'p-green', 'p-blue', 'p-purple', 'p-grey'].includes(g.statusCls) ? g.statusCls : 'p-grey'
-      return `<tr><td>${esc(g.group)}</td><td>${esc(String(g.msgs))}</td><td><span class="pill ${cls}">${esc(g.statusLabel || 'Active')}</span></td><td>${g.concern ? md(g.concern) : '—'}</td></tr>`
-    }).join('')}</tbody></table>
+      return `<tr><td class="nm">${esc(g.group)}</td><td class="msgs">${esc(String(g.msgs))}</td><td class="pc"><span class="pill ${cls}">${esc(g.statusLabel || 'Active')}</span></td><td class="tx">${g.concern ? md(g.concern) : '—'}</td></tr>`
+    }).join('')}</tbody></table></div>
     </div>`
   }
 
@@ -248,11 +287,22 @@ function renderReport(d) {
   // ---- charts (Chart.js inlined) ----
   let scripts = ''
   const inits = []
-  if (byAcct) inits.push(`new Chart(document.getElementById('byacct'),${jsonSafe(byAcct)});`)
-  if (escChart) inits.push(`new Chart(document.getElementById('concern'),${jsonSafe(escChart)});`)
-  if (oppChart) inits.push(`new Chart(document.getElementById('opp'),${jsonSafe(oppChart)});`)
+  if (byAcct) inits.push(`mk('byacct',${jsonSafe(byAcct)});`)
+  if (escChart) inits.push(`mk('concern',${jsonSafe(escChart)});`)
+  if (oppChart) inits.push(`mk('opp',${jsonSafe(oppChart)});`)
   if (inits.length) {
-    scripts = `<script>${CHARTJS}</script>\n<script>Chart.defaults.font.family="'Segoe UI',Roboto,Arial,sans-serif";Chart.defaults.color="#5a6573";\n${inits.join('\n')}</script>`
+    // On a phone-width canvas the 30-char y labels would eat most of the plot,
+    // so trim labels and tick fonts at run time (the config is width-agnostic).
+    const boot = `(function(){
+Chart.defaults.font.family="'Segoe UI',Roboto,Arial,sans-serif";Chart.defaults.color="#5a6573";
+var M=(window.innerWidth||document.documentElement.clientWidth)<620;
+function mk(id,c){var el=document.getElementById(id);if(!el)return;
+if(M){var n=16;c.data.labels=c.data.labels.map(function(l){l=String(l);return l.length>n?l.slice(0,n-1)+'\\u2026':l});
+c.options.scales.y.ticks.font={size:9};c.options.scales.x.ticks.font={size:9};c.options.scales.x.title.font={size:10};}
+new Chart(el,c);}
+${inits.join('\n')}
+})();`
+    scripts = `<script>${CHARTJS}</script>\n<script>${boot}</script>`
   }
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(d.title)}</title><style>${CSS}</style></head><body>${h}${scripts}</body></html>`

@@ -224,7 +224,22 @@ async function renderReports() {
   const syncDownload = () => { if (dl) dl.href = '/api/report/chats?download=1' + win() } // top download = raw chat data (no API)
   const viewMetrics = () => { if (status) status.textContent = ''; frame.src = '/api/report?t=' + Date.now() + win(); syncDownload() }
 
-  frame.onload = () => { if (status && status.dataset.busy !== '1') status.textContent = '' }
+  // On phones a fixed-height iframe letterboxes the report into a nested
+  // scroll area. Grow the frame to its content instead so the page scrolls.
+  const DESK_H = 'calc(100vh - 280px)'
+  const fitFrame = () => {
+    if ((window.innerWidth || 0) > 760) { frame.style.height = DESK_H; return }
+    try {
+      const doc = frame.contentDocument
+      const h = doc && (doc.documentElement.scrollHeight || (doc.body && doc.body.scrollHeight))
+      frame.style.height = h ? Math.max(420, h) + 'px' : DESK_H
+    } catch { frame.style.height = DESK_H }
+  }
+  frame.onload = () => {
+    if (status && status.dataset.busy !== '1') status.textContent = ''
+    fitFrame(); setTimeout(fitFrame, 300) // again after charts lay out
+  }
+  if (!frame.dataset.fitBound) { frame.dataset.fitBound = '1'; window.addEventListener('resize', fitFrame) }
   if (metricsBtn) metricsBtn.onclick = viewMetrics
   if (daysSel) daysSel.onchange = viewMetrics
 
