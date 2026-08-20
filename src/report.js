@@ -1,12 +1,22 @@
 // =============================================================
-//  Sonar — "Customer Chat Review" report builder (v2).
-//  Pulls authoritative counts from Postgres, asks Claude for the categorized
-//  analysis (escalations + opportunities), merges, and renders via
-//  src/reportTemplate.js. Used by /api/report (metrics) and /api/reports (AI).
+//  Sonar — "Customer Chat Review" report builder (v3, channel-tabbed).
+//  Builds the SAME report three times — COCO / FOFO / MBO — by splitting
+//  groups on their name (watchlist groups carry the channel in the name,
+//  e.g. "FOFO-DCA MARKETING, CHANDIGARH 10002716"; no COCO/FOFO = MBO).
+//  Each segment gets its own Postgres counts + Claude analysis, and all
+//  three land in ONE html with tabs on top (reportTemplate.renderTabbedReport).
+//  Used by /api/report (metrics) and /api/reports (AI).
 // =============================================================
 const store = require('./store')
 const aiReport = require('./aiReport')
-const { renderReport } = require('./reportTemplate')
+const { renderTabbedReport } = require('./reportTemplate')
+const { segmentCond } = require('./chatExport')
+
+const SEGMENTS = [
+  { key: 'coco', label: 'COCO' },
+  { key: 'fofo', label: 'FOFO' },
+  { key: 'mbo', label: 'MBO' },
+]
 
 const IN = (opts) => (ms) => (ms ? new Date(Number(ms)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...opts }) : '—')
 const fmtDateTime = IN({ day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -14,23 +24,14 @@ const fmtDayRaw = IN({ day: '2-digit', month: 'short', year: 'numeric' })
 const fmtDay = (ms) => fmtDayRaw(ms).replace(/ /g, '-')
 const norm = (s) => String(s || '').trim().toLowerCase()
 
-async function generateReport({ ids, days = null, ai = false, generatedAt = Date.now() } = {}) {
+// One segment = one full report body (same shape renderReport always took).
+async function buildSegment({ seg, ids, days, ai, generatedAt, title, daysLabel, msgWindow, genOn, footerBase }) {
   const scoped = Array.isArray(ids)
-  const genOn = fmtDateTime(generatedAt)
-  const daysLabel = days ? `${days}-Day Snapshot` : 'Full History'
-  const msgWindow = days ? `${days}d` : 'all'
-  const title = `D'Decor — Customer Chat Review (${daysLabel})`
-  const footerBase = (win) => `Generated from Sonar-captured WhatsApp chats (${win}). Escalations grouped in 4 categories; Opportunities in 5 (Bulk/Project · Deal-at-close · New-collection · Onboarding · Convert & save). Opportunity signals are inferential — an enquiry is not a booked order; validate & value against SAP/ERP. Quotes verbatim (Hindi translated). Counts are accounts-affected. Confidential — internal management use only.`
-
-  if (scoped && ids.length === 0) {
-    return { html: renderReport({ title, subtitle: 'Sonar WhatsApp capture', tagLine: 'No sessions granted', kpis: [], groups: [], ai: false, footerNote: footerBase('—') }), stats: { messages: 0, chats: 0 } }
-  }
-
   const q = (sql, params) => store.pool.query(sql, params)
-  const conds = [], p = []
+  const conds = [`(${segmentCond(seg.key)})`], p = []
   if (scoped) { p.push(ids); conds.push(`session_id = ANY($${p.length})`) }
   if (days) { p.push(generatedAt - days * 86400000); conds.push(`ts >= $${p.length}`) }
-  const filt = conds.length ? ' WHERE ' + conds.join(' AND ') : ''
+  const filt = ' WHERE ' + conds.join(' AND ')
 
   const t = (await q(`SELECT COUNT(*)::int n, COUNT(DISTINCT (session_id, chat_jid))::int chats, MIN(ts) mn, MAX(ts) mx FROM messages${filt}`, p)).rows[0] || {}
   const totalMsgs = t.n || 0
@@ -38,9 +39,9 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
 
   if (totalMsgs === 0) {
     return {
-      html: renderReport({ title, subtitle: `Source: Sonar WhatsApp capture · generated ${genOn}`, tagLine: `Window: ${daysLabel} · no messages captured yet`,
-        kpis: [{ value: '0', label: 'Groups' }, { value: '0', label: 'Messages' }, { value: '0', label: 'POs / Orders ref.', cls: 'green' }], groups: [], ai: false, footerNote: footerBase(daysLabel) }),
-      stats: { messages: 0, chats: 0 },
+      data: { title, subtitle: `Source: Sonar WhatsApp capture · generated ${genOn}`, tagLine: `${seg.label}  |  Window: ${daysLabel} · no messages captured`,
+        kpis: [{ value: '0', label: 'Groups' }, { value: '0', label: 'Messages' }, { value: '0', label: 'POs / Orders ref.', cls: 'green' }], groups: [], ai: false, footerNote: footerBase(daysLabel) },
+      stats: { messages: 0, chats: 0 }, mn: null, mx: null, verdict: '',
     }
   }
 
@@ -50,7 +51,7 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
 
   let poCount = 0
   try {
-    const poFilt = filt ? filt + " AND text ~ '\\d{6}'" : " WHERE text ~ '\\d{6}'"
+    const poFilt = filt + " AND text ~ '\\d{6}'"
     poCount = (await q(`SELECT COUNT(DISTINCT tok)::int n FROM (SELECT (regexp_matches(text, '(\\d{6})', 'g'))[1] tok FROM messages${poFilt}) s`, p)).rows[0]?.n || 0
   } catch { poCount = 0 }
 
@@ -62,7 +63,7 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
 
   let aidata = null
   if (ai) {
-    const r = await aiReport.analyze({ ids, days, generatedAt, groupActivity: groupActivity.map((g) => ({ name: g.name, msgs: g.msgs })) })
+    const r = await aiReport.analyze({ ids, days, generatedAt, segment: seg.key, groupActivity: groupActivity.map((g) => ({ name: g.name, msgs: g.msgs })) })
     aidata = r.data
   }
   const aiOk = !!aidata
@@ -75,8 +76,8 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
 
   const data = {
     title,
-    subtitle: `Source: WhatsApp capture · ${groupCount} group${groupCount !== 1 ? 's' : ''} · generated ${genOn}`,
-    tagLine: `Window: ${windowShort}  |  ${groupCount} groups  |  ~${totalMsgs.toLocaleString('en-IN')} messages  |  ${poCount}+ POs/orders`,
+    subtitle: `${seg.label} channel · Source: WhatsApp capture · ${groupCount} group${groupCount !== 1 ? 's' : ''} · generated ${genOn}`,
+    tagLine: `${seg.label}  |  Window: ${windowShort}  |  ${groupCount} groups  |  ~${totalMsgs.toLocaleString('en-IN')} messages  |  ${poCount}+ POs/orders`,
     windowShort,
     kpis: baseKpis,
     groups,
@@ -96,12 +97,46 @@ async function generateReport({ ids, days = null, ai = false, generatedAt = Date
     data.actionsStructural = aidata.actions_structural
   }
 
+  const verdict = aiOk ? (aidata.banner || []).map((b) => b.text).join(' ').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1') : ''
+  return { data, stats: { messages: totalMsgs, chats: t.chats || 0 }, mn: t.mn, mx: t.mx, verdict, groupCount }
+}
+
+async function generateReport({ ids, days = null, ai = false, generatedAt = Date.now() } = {}) {
+  const scoped = Array.isArray(ids)
+  const genOn = fmtDateTime(generatedAt)
+  const daysLabel = days ? `${days}-Day Snapshot` : 'Full History'
+  const msgWindow = days ? `${days}d` : 'all'
+  const title = `D'Decor — Customer Chat Review (${daysLabel})`
+  const footerBase = (win) => `Generated from Sonar-captured WhatsApp chats (${win}). Escalations grouped in 4 categories; Opportunities in 5 (Bulk/Project · Deal-at-close · New-collection · Onboarding · Convert & save). Opportunity signals are inferential — an enquiry is not a booked order; validate & value against SAP/ERP. Quotes verbatim (Hindi translated). Counts are accounts-affected. Confidential — internal management use only.`
+
+  if (scoped && ids.length === 0) {
+    const tabs = SEGMENTS.map((s) => ({ key: s.key, label: s.label,
+      data: { title, subtitle: 'Sonar WhatsApp capture', tagLine: `${s.label}  |  No sessions granted`, kpis: [], groups: [], ai: false, footerNote: footerBase('—') } }))
+    return { html: renderTabbedReport({ title, tabs }), stats: { messages: 0, chats: 0 } }
+  }
+
+  const segs = await Promise.all(SEGMENTS.map((seg) =>
+    buildSegment({ seg, ids, days, ai, generatedAt, title, daysLabel, msgWindow, genOn, footerBase })))
+
+  const totalMsgs = segs.reduce((a, s) => a + s.stats.messages, 0)
+  const totalChats = segs.reduce((a, s) => a + s.stats.chats, 0)
+  const totalGroups = segs.reduce((a, s) => a + (s.groupCount || 0), 0)
+  const mns = segs.map((s) => s.mn).filter((v) => v != null).map(Number)
+  const mxs = segs.map((s) => s.mx).filter((v) => v != null).map(Number)
+  const windowShort = totalMsgs ? `${fmtDay(Math.min(...mns))} → ${fmtDay(Math.max(...mxs))}` : daysLabel
+
+  const html = renderTabbedReport({ title, tabs: SEGMENTS.map((s, i) => ({ key: s.key, label: s.label, data: segs[i].data })) })
+
   const summary = {
     title, windowShort,
-    verdict: aiOk ? (aidata.banner || []).map((b) => b.text).join(' ').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1') : '',
-    kpis: data.kpis,
+    verdict: segs.map((s, i) => (s.verdict ? `${SEGMENTS[i].label}: ${s.verdict}` : '')).filter(Boolean).join(' '),
+    kpis: [
+      { value: String(totalGroups), label: 'Groups (active)' },
+      { value: '~' + totalMsgs.toLocaleString('en-IN'), label: `Messages (${msgWindow})` },
+      ...SEGMENTS.map((s, i) => ({ value: '~' + segs[i].stats.messages.toLocaleString('en-IN'), label: `${s.label} msgs` })),
+    ],
   }
-  return { html: renderReport(data), stats: { messages: totalMsgs, chats: t.chats || 0 }, summary }
+  return { html, stats: { messages: totalMsgs, chats: totalChats }, summary }
 }
 
 module.exports = { generateReport }

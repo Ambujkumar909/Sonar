@@ -110,9 +110,10 @@ Rules:
 - Return your analysis via the required structured schema ONLY.`
 
 // groupActivity: [{name, msgs}] from SQL (authoritative counts)
-async function analyze({ ids, days = null, generatedAt = Date.now(), groupActivity = [] } = {}) {
+// segment: null = all groups; 'coco'|'fofo'|'mbo' = analyze only that channel's groups.
+async function analyze({ ids, days = null, generatedAt = Date.now(), groupActivity = [], segment = null } = {}) {
   if (!isConfigured()) throw new Error('ANTHROPIC_API_KEY is not set on the server')
-  const { text: transcript, messages, truncated } = await buildTranscript({ ids, days, cap: MAX_TRANSCRIPT_CHARS, generatedAt })
+  const { text: transcript, messages, truncated } = await buildTranscript({ ids, days, cap: MAX_TRANSCRIPT_CHARS, generatedAt, segment })
   if (!messages) return { data: null, empty: true }
 
   const activityTable = groupActivity.length

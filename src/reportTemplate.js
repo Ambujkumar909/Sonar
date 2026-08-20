@@ -88,11 +88,23 @@ td.acc{font-weight:600;color:#33414f;white-space:nowrap}
 .nodata{color:#98a2b3;font-size:13px;padding:24px 0}
 .tw{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 footer{text-align:center;color:var(--muted);font-size:11.5px;margin-top:30px}
+/* ---- channel tabs (COCO / FOFO / MBO) — one report per pane, same format ----
+   Pure CSS switching (hidden radios + :checked) so tabs work even where
+   JavaScript is blocked (Outlook attachment preview, iOS Quick Look). JS is
+   only an enhancement: it lazy-builds the charts of a pane on first open. */
+.tabradio{position:absolute;width:1px;height:1px;opacity:0;margin:0;pointer-events:none}
+.tabs{position:sticky;top:0;z-index:50;display:flex;background:#0a1f38;box-shadow:0 2px 10px rgba(0,0,0,.3)}
+.tabbtn{flex:1;display:block;text-align:center;color:rgba(255,255,255,.6);font-size:13.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;padding:14px 10px;cursor:pointer;border-bottom:3px solid transparent;transition:color .15s,background-color .15s,border-color .15s;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+.tabbtn:hover{color:#fff}
+.tabpane{display:none}
+@keyframes panein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.tabpane{animation:none!important}}
 @media(max-width:1050px){.kpis{grid-template-columns:repeat(3,1fr)}.banner{flex-direction:column}.c8,.c6,.c5,.c7,.c4{grid-column:span 12}.recos{grid-template-columns:1fr}}
 
 /* ---- phones ---- the report is read inside a ~360px iframe, so anything
    built on fixed column widths has to be re-laid-out, not just shrunk. */
 @media(max-width:760px){
+  .tabbtn{font-size:12px;padding:11px 6px;letter-spacing:.8px}
   header{padding:16px 14px}
   header h1{font-size:17px;line-height:1.3}
   header .sub{font-size:12px}
@@ -149,7 +161,10 @@ function hbarConfig(labels, data, colors, axisTitle, stepSize) {
   }
 }
 
-function renderReport(d) {
+// Builds one report body (header + all sections). sfx suffixes canvas ids so
+// several bodies can coexist in one document (the tabbed report). Returns the
+// HTML plus the chart configs to initialize.
+function buildBody(d, sfx = '') {
   const groups = d.groups || []
   const hasAI = !!d.ai
 
@@ -198,7 +213,7 @@ function renderReport(d) {
   h += `<div class="card ${escChart ? 'c8' : 'c12'}">
     <h3>Activity by Account (messages${d.windowShort ? ', ' + esc(d.windowShort) : ''})</h3>
     <div class="note">${esc(d.byAccountNote || 'Message volume per monitored group this window.')}</div>
-    ${byAcct ? `<div class="chartbox" style="height:${Math.max(320, topGroups.length * 26 + 60)}px"><canvas id="byacct"></canvas></div>` : '<div class="nodata">No data.</div>'}
+    ${byAcct ? `<div class="chartbox" style="height:${Math.max(320, topGroups.length * 26 + 60)}px"><canvas id="byacct${sfx}"></canvas></div>` : '<div class="nodata">No data.</div>'}
   </div>`
 
   // ---- Escalations-by-category chart ----
@@ -206,7 +221,7 @@ function renderReport(d) {
     h += `<div class="card c4">
       <h3>Escalations by Category (accounts affected)</h3>
       <div class="note">The four escalation buckets.</div>
-      <div class="chartbox sm"><canvas id="concern"></canvas></div>
+      <div class="chartbox sm"><canvas id="concern${sfx}"></canvas></div>
     </div>`
   }
 
@@ -250,7 +265,7 @@ function renderReport(d) {
       h += `<div class="card opp c4">
         <h3>Opportunities by Category (accounts)</h3>
         <div class="note">Where winnable demand is concentrated this window.</div>
-        <div class="chartbox sm"><canvas id="opp"></canvas></div>
+        <div class="chartbox sm"><canvas id="opp${sfx}"></canvas></div>
       </div>`
     }
   }
@@ -284,28 +299,71 @@ function renderReport(d) {
   <footer>${esc(d.footerNote)}</footer>
 </div>`
 
-  // ---- charts (Chart.js inlined) ----
-  let scripts = ''
-  const inits = []
-  if (byAcct) inits.push(`mk('byacct',${jsonSafe(byAcct)});`)
-  if (escChart) inits.push(`mk('concern',${jsonSafe(escChart)});`)
-  if (oppChart) inits.push(`mk('opp',${jsonSafe(oppChart)});`)
-  if (inits.length) {
-    // On a phone-width canvas the 30-char y labels would eat most of the plot,
-    // so trim labels and tick fonts at run time (the config is width-agnostic).
-    const boot = `(function(){
-Chart.defaults.font.family="'Segoe UI',Roboto,Arial,sans-serif";Chart.defaults.color="#5a6573";
+  const charts = []
+  if (byAcct) charts.push({ id: 'byacct' + sfx, cfg: byAcct })
+  if (escChart) charts.push({ id: 'concern' + sfx, cfg: escChart })
+  if (oppChart) charts.push({ id: 'opp' + sfx, cfg: oppChart })
+  return { html: h, charts }
+}
+
+// mk(): builds one chart. On a phone-width canvas the 30-char y labels would
+// eat most of the plot, so trim labels and tick fonts at run time (the config
+// is width-agnostic).
+const MK_FN = `Chart.defaults.font.family="'Segoe UI',Roboto,Arial,sans-serif";Chart.defaults.color="#5a6573";
 var M=(window.innerWidth||document.documentElement.clientWidth)<620;
 function mk(id,c){var el=document.getElementById(id);if(!el)return;
 if(M){var n=16;c.data.labels=c.data.labels.map(function(l){l=String(l);return l.length>n?l.slice(0,n-1)+'\\u2026':l});
 c.options.scales.y.ticks.font={size:9};c.options.scales.x.ticks.font={size:9};c.options.scales.x.title.font={size:10};}
-new Chart(el,c);}
-${inits.join('\n')}
-})();`
+new Chart(el,c);}`
+
+const docShell = (title, body, scripts, extraCss = '') =>
+  `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(title)}</title><style>${CSS}${extraCss}</style></head><body>${body}${scripts}</body></html>`
+
+// Single-view report (used by the sample report).
+function renderReport(d) {
+  const { html, charts } = buildBody(d, '')
+  let scripts = ''
+  if (charts.length) {
+    const boot = `(function(){\n${MK_FN}\n${charts.map((c) => `mk(${jsonSafe(c.id)},${jsonSafe(c.cfg)});`).join('\n')}\n})();`
     scripts = `<script>${CHARTJS}</script>\n<script>${boot}</script>`
   }
-
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(d.title)}</title><style>${CSS}</style></head><body>${h}${scripts}</body></html>`
+  return docShell(d.title, html, scripts)
 }
 
-module.exports = { renderReport }
+// Tabbed report — one tab per channel (COCO / FOFO / MBO), each pane holding a
+// full report in the same format. Switching is PURE CSS (hidden radios +
+// :checked ~ pane) so it works with JavaScript blocked (Outlook preview).
+// JS only lazy-builds a pane's charts on first open (Chart.js can't size a
+// canvas inside display:none — and needs JS anyway).
+// tabs: [{ key, label, data }] — first tab starts active. key must be a plain
+// slug (it is used inside CSS selectors).
+function renderTabbedReport({ title, tabs }) {
+  const bodies = tabs.map((t, i) => ({ key: t.key, label: t.label, active: i === 0, ...buildBody(t.data, '-' + t.key) }))
+  const radios = bodies.map((b) =>
+    `<input type="radio" name="ctab" id="tab-${esc(b.key)}" class="tabradio" data-tab="${esc(b.key)}"${b.active ? ' checked' : ''}>`).join('')
+  const bar = `<nav class="tabs">${bodies.map((b) =>
+    `<label class="tabbtn" for="tab-${esc(b.key)}">${esc(b.label)}</label>`).join('')}</nav>`
+  const panes = bodies.map((b) => `<div class="tabpane" id="pane-${esc(b.key)}">${b.html}</div>`).join('\n')
+  // Radios sit before the nav and the panes, so :checked drives both the
+  // active-tab styling and pane visibility via the sibling (~) combinator.
+  const tabCss = bodies.map((b) => `
+#tab-${b.key}:checked~#pane-${b.key}{display:block;animation:panein .22s ease}
+#tab-${b.key}:checked~.tabs .tabbtn[for="tab-${b.key}"]{color:#fff;border-bottom-color:var(--accent);background:rgba(255,255,255,.07)}
+#tab-${b.key}:focus-visible~.tabs .tabbtn[for="tab-${b.key}"]{outline:2px solid var(--gold);outline-offset:-2px}`).join('')
+
+  const chartsByTab = {}
+  for (const b of bodies) chartsByTab[b.key] = b.charts
+  const anyCharts = bodies.some((b) => b.charts.length)
+  const boot = `(function(){
+${anyCharts ? MK_FN : 'function mk(){}'}
+var CH=${jsonSafe(chartsByTab)},made={};
+function initCharts(k){if(made[k])return;made[k]=1;var a=CH[k]||[];for(var i=0;i<a.length;i++)mk(a[i].id,a[i].cfg);}
+var rs=document.querySelectorAll('.tabradio');
+for(var i=0;i<rs.length;i++)rs[i].addEventListener('change',function(){if(this.checked){initCharts(this.getAttribute('data-tab'));window.scrollTo(0,0);}});
+initCharts(${jsonSafe(bodies[0] ? bodies[0].key : '')});
+})();`
+  const scripts = (anyCharts ? `<script>${CHARTJS}</script>\n` : '') + `<script>${boot}</script>`
+  return docShell(title, radios + bar + panes, scripts, tabCss)
+}
+
+module.exports = { renderReport, renderTabbedReport }
