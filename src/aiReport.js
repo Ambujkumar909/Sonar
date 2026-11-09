@@ -1,5 +1,5 @@
 // =============================================================
-//  Sonar — AI analysis for the D'Decor "Customer Chat Review" (v2).
+//  Sonar — AI analysis for the "Customer Chat Review" (v2).
 //  Produces the categorized management report: ESCALATIONS in 4 buckets +
 //  OPPORTUNITIES in 5 buckets, banner, headline KPIs, per-group read, and
 //  3-column recommendations. Returns structured data; reportTemplate renders it.
@@ -95,11 +95,11 @@ const SCHEMA = {
   required: ['banner', 'kpis', 'escalations', 'escalation_counts', 'opportunities', 'opportunity_counts', 'groups', 'actions_fix', 'actions_win', 'actions_structural'],
 }
 
-const SYSTEM = `You are an operations + sales analyst for D'Decor, an Indian furnishings brand. You read captured WhatsApp chats between the D'Decor team and its dealers/customers and produce a categorized management "Customer Chat Review" for leadership.
+const SYSTEM = `You are an operations + sales analyst for the company. You read captured WhatsApp chats between the company's team and its dealers/customers and produce a categorized management "Customer Chat Review" for leadership.
 
 Rules:
 - Base EVERYTHING strictly on the provided messages. NEVER invent accounts, PO/order numbers, quantities, amounts, or quotes. If data is thin, return fewer rows rather than padding.
-- "team" = D'Decor side (ME / outgoing); "dealer/customer" = incoming.
+- "team" = company side (ME / outgoing); "dealer/customer" = incoming.
 - Quote short, telling phrases VERBATIM (in "quotes"). Translate Hindi to English but keep the quoted flavour.
 - TWO parallel structures:
   1) ESCALATIONS — problems, split into 4 categories: stock / dispatch / quality / other (portal-QR-mapping, ledger, rate).
@@ -110,10 +110,9 @@ Rules:
 - Return your analysis via the required structured schema ONLY.`
 
 // groupActivity: [{name, msgs}] from SQL (authoritative counts)
-// segment: null = all groups; 'coco'|'fofo'|'mbo' = analyze only that channel's groups.
-async function analyze({ ids, days = null, generatedAt = Date.now(), groupActivity = [], segment = null } = {}) {
+async function analyze({ ids, days = null, generatedAt = Date.now(), groupActivity = [] } = {}) {
   if (!isConfigured()) throw new Error('ANTHROPIC_API_KEY is not set on the server')
-  const { text: transcript, messages, truncated } = await buildTranscript({ ids, days, cap: MAX_TRANSCRIPT_CHARS, generatedAt, segment })
+  const { text: transcript, messages, truncated } = await buildTranscript({ ids, days, cap: MAX_TRANSCRIPT_CHARS, generatedAt })
   if (!messages) return { data: null, empty: true }
 
   const activityTable = groupActivity.length

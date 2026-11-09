@@ -129,7 +129,7 @@ async function runDaily({ by = 'scheduler' } = {}) {
     try {
       await mailer.sendReport({
         to: recipients,
-        subject: `D'Decor — Customer Chat Review (${summary.windowShort})`,
+        subject: `Customer Chat Review (${summary.windowShort})`,
         bodyHtml: emailBody(summary, stats),
         attachmentHtml: html,
         filename: `customer-chat-review-${new Date().toISOString().slice(0, 10)}.html`,
@@ -141,16 +141,47 @@ async function runDaily({ by = 'scheduler' } = {}) {
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-function emailBody(summary, stats) {
-  const kpis = (summary.kpis || []).map((k) => `<td style="padding:8px 14px;border:1px solid #e4e7eb"><div style="font-size:20px;font-weight:700;color:#0f2c4d">${esc(k.value)}</div><div style="font-size:11px;color:#667085;text-transform:uppercase">${esc(k.label)}</div></td>`).join('')
-  return `<div style="font-family:'Segoe UI',Arial,sans-serif;color:#1d2733;max-width:640px">
-    <h2 style="color:#0f2c4d;margin:0 0 4px">D'Decor — Customer Chat Review</h2>
-    <div style="color:#667085;font-size:13px;margin-bottom:14px">${esc(summary.windowShort)} · ${stats.messages} messages</div>
-    ${summary.verdict ? `<p style="font-size:14px;line-height:1.5">${esc(summary.verdict)}</p>` : '<p style="font-size:14px;color:#667085">No AI narrative (low activity in window). See the attached report for details.</p>'}
-    ${kpis ? `<table style="border-collapse:collapse;margin:12px 0"><tr>${kpis}</tr></table>` : ''}
-    <p style="font-size:13px;color:#667085">The full report (with charts) is attached as an HTML file — open it in a browser.</p>
-    <p style="font-size:11px;color:#98a2b3">Automated report from Sonar · Confidential — internal use only.</p>
-  </div>`
+// Email body — Outlook desktop renders this with Word's engine, so it is
+// tables + inline styles + bgcolor only (no flex, no classes, no CSS vars).
+const { TONE } = require('./reportTemplate')
+const KPI_INK = { red: TONE.red.solid, amber: TONE.amber.solid, green: TONE.green.solid, purple: TONE.purple.solid }
+const FONT = "'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
+function emailBody(summary, stats, note = '') {
+  const kpis = summary.kpis || []
+  const cells = kpis.map((k) => `<td width="50%" valign="top" style="padding:16px 16px 20px;border-top:3px solid ${KPI_INK[k.cls] || TONE.teal.solid};background:#f5f7f8">
+      <div style="font-family:${FONT};font-size:26px;line-height:30px;font-weight:300;color:#14202a">${esc(k.value)}</div>
+      <div style="font-family:${FONT};font-size:13px;line-height:18px;color:#66727d;padding-top:4px">${esc(k.label)}</div></td>`)
+  const rows = []
+  for (let i = 0; i < cells.length; i += 2) {
+    const r = cells.slice(i, i + 2)
+    while (r.length < 2) r.push('<td width="50%"></td>')
+    rows.push(`<tr>${r.join('<td width="8" style="font-size:0;line-height:0">&nbsp;</td>')}</tr><tr><td colspan="3" height="8" style="font-size:0;line-height:0">&nbsp;</td></tr>`)
+  }
+  const p = (txt, extra = '') => `<p style="margin:0;font-family:${FONT};font-size:15px;line-height:23px;color:#3d4a55;${extra}">${txt}</p>`
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#e8ecee">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#e8ecee" style="background:#e8ecee"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;background:#fcfdfd">
+  <tr><td bgcolor="#0c2330" style="background:#0c2330;padding:28px 32px 24px">
+    <div style="font-family:${FONT};font-size:13px;line-height:18px;font-weight:600;color:#a9bcc6"><span style="color:#5fb7c0">Sonar</span> WhatsApp intelligence</div>
+    <div style="font-family:${FONT};font-size:26px;line-height:32px;font-weight:600;color:#f7fafb;padding-top:16px">Customer Chat Review</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px"><tr>
+      <td style="font-family:${FONT};font-size:14px;line-height:20px;color:#a9bcc6;padding-right:24px">${esc(summary.windowShort)}</td>
+      <td style="font-family:${FONT};font-size:14px;line-height:20px;color:#a9bcc6">${esc(String(stats.messages))} messages</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:28px 32px 8px">
+    ${note ? p(note, 'padding-bottom:16px;color:#0b5c63') : ''}
+    ${summary.verdict ? p(esc(summary.verdict)) : p('No AI narrative (low activity in window). See the attached report for details.', 'color:#66727d')}
+  </td></tr>
+  ${rows.length ? `<tr><td style="padding:16px 32px 8px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows.join('')}</table></td></tr>` : ''}
+  <tr><td style="padding:12px 32px 28px">
+    ${p('The full report (with charts) is attached as an HTML file — open it in a browser.', 'font-size:14px;line-height:21px;color:#66727d')}
+    <div style="border-top:1px solid #e3e7ea;margin-top:20px;padding-top:16px;font-family:${FONT};font-size:12px;line-height:18px;color:#8d97a0">Automated report from Sonar. Confidential — internal use only.</div>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`
 }
 
 // --- scheduling loop ---
@@ -193,4 +224,4 @@ function status() {
 }
 function getConfig() { const c = _cfg || defaults(); return { enabled: c.enabled, times: timesLabel(), intervalDays: c.intervalDays, windowDays: c.windowDays, tz: c.tz } }
 
-module.exports = { start, stop, reload: load, save, runDaily, status, getConfig, nextRunAt }
+module.exports = { start, stop, reload: load, save, runDaily, status, getConfig, nextRunAt, emailBody }
