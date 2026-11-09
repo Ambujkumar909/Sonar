@@ -1,0 +1,351 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sonar — WhatsApp Intelligence</title>
+<link rel="icon" type="image/png" href="/assets/favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/styles.css" />
+
+<div class="app">
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <img class="brand-logo theme-light-only" src="/assets/logo-light.png" alt="Sonar" />
+      <img class="brand-logo theme-dark-only" src="/assets/logo-dark.png" alt="Sonar" />
+    </div>
+
+    <div class="readonly-badge"><span class="dot"></span> Observe-only · never sends</div>
+
+    <nav class="nav" id="nav">
+      <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
+      <button data-view="reports"><span class="ico">📊</span> Reports</button>
+      <button data-view="emails"><span class="ico">✉</span> Email Reports</button>
+      <button data-view="scheduler"><span class="ico">⏰</span> Scheduler</button>
+      <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
+      <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
+      <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
+      <button data-view="keywords"><span class="ico">⚑</span> Keyword Alerts</button>
+      <button data-view="health"><span class="ico">♥</span> Health</button>
+      <button data-view="audit"><span class="ico">🛡</span> Audit Trail</button>
+      <button data-view="license"><span class="ico">🔑</span> License</button>
+      <button data-view="users"><span class="ico">◐</span> Users</button>
+      <button data-view="files"><span class="ico">▤</span> Log Files</button>
+      <button data-view="about"><span class="ico">ⓘ</span> About</button>
+    </nav>
+
+    <div class="foot">
+      <button class="theme-btn" id="themeToggle" title="Toggle light / dark" aria-label="Toggle theme">
+        <svg class="ic-sun" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.4 4.4l1.6 1.6M18 18l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.4 19.6l1.6-1.6M18 6l1.6-1.6"/></svg>
+        <svg class="ic-moon" viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ===================== MAIN ===================== -->
+  <main class="main">
+    <div class="license-banner hide" id="licenseBanner"></div>
+    <div class="topbar">
+      <h1 id="pageTitle">Dashboard</h1>
+      <div class="spacer"></div>
+      <div class="search">
+        <span>⌕</span>
+        <input id="globalSearch" placeholder="Search every message…" />
+      </div>
+      <div class="pill" id="healthPill"><span class="dot ok"></span> <span id="healthText">All systems silent</span></div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <section id="view-dashboard" class="view">
+      <div id="newGroupBanner" class="card hide" style="margin-top:0;margin-bottom:18px"></div>
+      <div class="grid cols-3" id="statCards"></div>
+      <div class="grid cols-2" style="margin-top:18px">
+        <div class="card">
+          <h3>Messages · last 24 hours</h3>
+          <div class="bars" id="hourlyBars"></div>
+          <div class="bar-axis" id="hourlyAxis"></div>
+        </div>
+        <div class="card">
+          <h3>Most active chats</h3>
+          <div id="topChats"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <h3>Live feed</h3>
+        <div class="feed" id="liveFeed"><div class="empty">Waiting for incoming messages…</div></div>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="view-reports" class="view hide">
+      <div class="card" style="margin-bottom:18px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <h3 style="margin:0">WhatsApp Activity Report</h3>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="in" id="reportDays" style="padding:8px 10px">
+              <option value="2">Last 2 days</option>
+              <option value="3">Last 3 days</option>
+              <option value="5">Last 5 days</option>
+              <option value="7" selected>Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="all">All captured</option>
+            </select>
+            <button class="btn" id="reportMetrics">📊 View metrics</button>
+            <a class="btn" id="reportDownload" href="#">⬇ Download chat data</a>
+            <button class="btn primary" id="reportAi" style="display:none">✨ Generate AI report</button>
+          </div>
+        </div>
+        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-soft)"><b>View metrics</b> is free and live. <b>⬇ Download chat data</b> saves the raw chat transcripts for the selected window (for offline analysis in Claude Code — no API cost). <b>✨ Generate AI report</b> confirms first, runs the Claude analysis once, and saves it under <b>Saved AI reports</b> below — open/download it there without regenerating. <span id="reportStatus" style="color:var(--warn);font-weight:700"></span></p>
+      </div>
+      <div class="card admin-only" id="savedReportsCard" style="margin-bottom:18px">
+        <h3>Saved AI reports</h3>
+        <div class="tablewrap"><table id="savedReportsTable"></table></div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <iframe id="reportFrame" title="WhatsApp Activity Report" style="width:100%;height:calc(100vh - 280px);min-height:420px;border:0;background:#fff;border-radius:14px;display:block"></iframe>
+      </div>
+    </section>
+
+    <!-- EMAIL REPORTS -->
+    <section id="view-emails" class="view hide">
+      <div class="card" id="scheduleCard" style="margin-bottom:18px"></div>
+      <div class="card" style="margin-bottom:18px">
+        <h3>Add report recipient</h3>
+        <div class="inline-form">
+          <div class="field" style="flex:1"><label>Email address</label><input class="in" id="emailAddr" placeholder="name@company.com" /></div>
+          <div class="field" style="flex:1"><label>Label (optional)</label><input class="in" id="emailLabel" placeholder="e.g. Sales Head" /></div>
+          <button class="btn primary" id="addEmailBtn">＋ Add</button>
+        </div>
+        <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">The daily report is emailed to every <b>enabled</b> recipient. Toggle a recipient off to temporarily stop sending to them without removing them.</p>
+      </div>
+      <div class="card tablewrap"><table id="emailTable"></table></div>
+    </section>
+
+    <!-- SCHEDULER -->
+    <section id="view-scheduler" class="view hide">
+      <div class="card" id="schedNextCard" style="margin-bottom:18px"></div>
+      <div class="card">
+        <h3>Report schedule</h3>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin:6px 0 16px">Configure when the report runs and how much it covers. Changes apply immediately.</p>
+        <div class="inline-form" style="align-items:flex-end;flex-wrap:wrap;gap:16px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="schedEnabled" /> <b>Enabled</b></label>
+          <div class="field"><label>Run at time(s) — 24h, comma-separated</label><input class="in" id="schedTimes" placeholder="14:00, 19:00" /></div>
+        </div>
+        <div class="inline-form" style="align-items:flex-end;flex-wrap:wrap;gap:16px;margin-top:14px">
+          <div class="field"><label>Frequency</label>
+            <select class="in" id="schedFreq">
+              <option value="1">Every day</option>
+              <option value="3">Every 3 days</option>
+              <option value="7">Weekly</option>
+              <option value="30">Monthly (30 days)</option>
+              <option value="365">Yearly</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div class="field" id="schedFreqCustomWrap" style="display:none"><label>…every N days</label><input class="in" id="schedFreqCustom" type="number" min="1" max="3650" placeholder="e.g. 10" /></div>
+          <div class="field"><label>Each report covers</label>
+            <select class="in" id="schedWindow">
+              <option value="1">Last 24 hours</option>
+              <option value="3">Last 3 days</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="365">Last year</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </div>
+          <div class="field" id="schedWindowCustomWrap" style="display:none"><label>…last N days</label><input class="in" id="schedWindowCustom" type="number" min="1" max="3650" placeholder="e.g. 14" /></div>
+          <div class="field"><label>Timezone</label><input class="in" id="schedTz" placeholder="Asia/Kolkata" /></div>
+        </div>
+        <div style="margin-top:18px"><button class="btn primary" id="saveSchedBtn">Save schedule</button></div>
+      </div>
+    </section>
+
+    <!-- SESSIONS -->
+    <section id="view-sessions" class="view hide">
+      <div class="card" style="margin-bottom:18px">
+        <h3>Connect a new device</h3>
+        <div class="inline-form">
+          <div class="field"><label>Session name</label><input class="in" id="newSessionName" placeholder="e.g. Sales Phone" /></div>
+          <button class="btn primary" id="addSessionBtn">＋ Create & show QR</button>
+        </div>
+      </div>
+      <div class="grid cols-3" id="sessionCards"></div>
+    </section>
+
+    <!-- CHATS -->
+    <section id="view-chats" class="view hide">
+      <div class="chat-layout card" style="padding:0; overflow:hidden">
+        <div class="chat-side">
+          <div class="chat-side-top">
+            <select class="in chat-session" id="chatSession"></select>
+            <div class="segmented" id="chatScope">
+              <button class="seg active" data-scope="active">Recent</button>
+              <button class="seg" data-scope="logs">Logs (archive)</button>
+            </div>
+            <div class="segmented" id="chatSeg">
+              <button class="seg active" data-seg="all">All</button>
+              <button class="seg" data-seg="group">Groups</button>
+              <button class="seg" data-seg="direct">Direct</button>
+            </div>
+            <div class="chat-search"><span>⌕</span><input id="chatFilter" placeholder="Search name…" /></div>
+          </div>
+          <div class="chat-list" id="chatList"></div>
+        </div>
+        <div class="chat-view">
+          <div class="chat-view-head" id="chatHead">
+            <div class="ch-empty">Select a conversation</div>
+          </div>
+          <div class="messages" id="chatMessages">
+            <div class="empty">Pick a conversation from the left to read its history.</div>
+          </div>
+          <div class="readonly-note">🔒 Read-only — Sonar never sends messages or read receipts</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WATCHLIST -->
+    <section id="view-watchlist" class="view hide">
+      <div class="card" style="margin-bottom:18px">
+        <h3>Add to watchlist</h3>
+        <div class="inline-form">
+          <div class="field"><label>Session</label><select class="in" id="watchSession"></select></div>
+          <div class="field"><label>Type</label><select class="in" id="watchKind"><option value="group">Group name</option><option value="number">Phone number</option></select></div>
+          <div class="field" style="flex:1"><label>Value</label><input class="in" id="watchValue" placeholder="Group name, or number like 919812345678" /></div>
+          <button class="btn primary" id="addWatchBtn">＋ Add</button>
+        </div>
+        <div class="inline-form" id="groupPickRow" style="margin-top:10px">
+          <div class="field" style="flex:1"><label>Or pick a group from this session</label>
+            <select class="in" id="watchGroupSelect"><option value="">— fetch groups, then choose —</option></select>
+          </div>
+          <button class="btn" id="fetchGroupsBtn" type="button">⟳ Fetch groups</button>
+        </div>
+        <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">Tip: pick a <b>group</b> from the dropdown above (click <b>Fetch groups</b> after the session is linked) instead of typing it. For a phone number, type the country code + number as <b>digits only</b> — e.g. <b>919812345678</b> (no <b>+</b>, spaces, or symbols).</p>
+      </div>
+      <div class="card tablewrap"><table id="watchTable"></table></div>
+    </section>
+
+    <!-- KEYWORDS -->
+    <section id="view-keywords" class="view hide">
+      <div class="card" style="margin-bottom:18px">
+        <h3>Keyword alerts</h3>
+        <div class="inline-form">
+          <div class="field" style="flex:1"><label>Keyword (case-insensitive)</label><input class="in" id="keywordValue" placeholder="e.g. quote, price, order, refund…" /></div>
+          <button class="btn primary" id="addKeywordBtn">＋ Add keyword</button>
+        </div>
+      </div>
+      <div class="card"><h3>Active keywords</h3><div class="chips" id="keywordChips"></div></div>
+    </section>
+
+    <!-- HEALTH (the silent operational log lives here, out of the way) -->
+    <section id="view-health" class="view hide">
+      <div class="grid cols-4" id="healthStats" style="margin-bottom:18px"></div>
+      <div class="card">
+        <h3>Resilience log · every reconnect & error, handled silently</h3>
+        <div class="events" id="eventList"></div>
+      </div>
+    </section>
+
+    <!-- AUDIT TRAIL -->
+    <section id="view-audit" class="view hide">
+      <div class="grid cols-4" id="auditStats" style="margin-bottom:18px"></div>
+      <div class="card" style="margin-bottom:18px">
+        <h3>Active sessions · who is logged in right now</h3>
+        <div class="tablewrap"><table id="activeTable"></table></div>
+      </div>
+      <div class="card" style="margin-bottom:18px">
+        <h3>Login history · duration per session</h3>
+        <div class="tablewrap"><table id="loginTable"></table></div>
+      </div>
+      <div class="card">
+        <h3>Action log · everything every user has done</h3>
+        <div class="tablewrap"><table id="auditTable"></table></div>
+      </div>
+    </section>
+
+    <!-- USERS -->
+    <section id="view-users" class="view hide">
+      <div class="card admin-only" id="addUserCard" style="margin-bottom:18px">
+        <h3>Add user</h3>
+        <div class="inline-form">
+          <div class="field"><label>Username</label><input class="in" id="newUser" placeholder="username" /></div>
+          <div class="field"><label>Password</label><input class="in" id="newPass" type="password" placeholder="min 6 chars" /></div>
+          <div class="field"><label>Role</label><select class="in" id="newRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="viewer">Viewer</option></select></div>
+          <button class="btn primary" id="addUserBtn">＋ Create user</button>
+        </div>
+      </div>
+      <div class="card tablewrap admin-only" id="usersTableCard" style="margin-bottom:18px"><table id="usersTable"></table></div>
+
+      <div class="card admin-only" id="grantsCard" style="margin-bottom:18px">
+        <h3>Session access grants · give managers / viewers specific sessions</h3>
+        <div class="inline-form" style="margin-bottom:14px">
+          <div class="field"><label>User</label><select class="in" id="grantUser"></select></div>
+          <div class="field"><label>Session</label><select class="in" id="grantSession"></select></div>
+          <button class="btn primary" id="addGrantBtn">＋ Grant access</button>
+        </div>
+        <div class="tablewrap"><table id="grantsTable"></table></div>
+      </div>
+    </section>
+
+    <!-- LICENSE -->
+    <section id="view-license" class="view hide">
+      <div class="card" id="licenseStatusCard" style="margin-bottom:18px"></div>
+      <div class="card" id="licenseActivateCard">
+        <h3>Activate / change license key</h3>
+        <div class="inline-form">
+          <div class="field" style="flex:1"><label>License key</label><input class="in" id="licenseKey" placeholder="SONAR-XXXX-XXXX-XXXX-XXXX" /></div>
+          <button class="btn primary" id="activateBtn">Activate</button>
+          <button class="btn" id="refreshLicenseBtn">↻ Re-check now</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- FILES -->
+    <section id="view-files" class="view hide">
+      <div class="card tablewrap"><table id="filesTable"></table></div>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="view-about" class="view hide">
+      <div id="aboutCard"></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<!-- PROFILE (bottom-right, all roles) -->
+<div class="profile-fab" id="profileFab" style="display:none">?</div>
+<div class="profile-pop" id="profilePop">
+  <div class="phead">
+    <div class="pav" id="popAv">?</div>
+    <div><div class="pname" id="popName">—</div><div class="prole" id="popRole">—</div></div>
+  </div>
+  <h4>Change my password</h4>
+  <div class="field"><input class="in" id="curPass" type="password" placeholder="Current password" autocomplete="current-password" /></div>
+  <div class="field"><input class="in" id="nxtPass" type="password" placeholder="New password (min 6)" autocomplete="new-password" /></div>
+  <div class="prow">
+    <button class="btn primary" id="changePassBtn">Update password</button>
+  </div>
+  <div class="prow">
+    <button class="btn danger" id="logoutBtn">⎋ Sign out</button>
+  </div>
+</div>
+
+<!-- LOGIN GATE -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <img class="login-logo theme-light-only" src="/assets/logo-light.png" alt="Sonar" />
+    <img class="login-logo theme-dark-only" src="/assets/logo-dark.png" alt="Sonar" />
+    <p class="login-sub">Sign in to continue</p>
+    <form id="loginForm">
+      <div class="field"><label>Username</label><input class="in" id="loginUser" autocomplete="username" autofocus /></div>
+      <div class="field"><label>Password</label><input class="in" id="loginPass" type="password" autocomplete="current-password" /></div>
+      <button class="btn primary" type="submit" id="loginBtn" style="width:100%;justify-content:center;text-align:center">Sign in</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app.js"></script>
