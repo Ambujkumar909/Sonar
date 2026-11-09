@@ -1,0 +1,53 @@
+Sonar offline license keys
+Generated : 2026-11-09T07:42:02.007Z
+Mode      : staggered  (Key N valid N x 1yr — apply Key 1 now, move to the next each renewal)
+Count     : 15
+
+Apply: put ONE key in .env as LICENSE_KEY, then restart. When it expires, use the next.
+Keep this file PRIVATE.
+========================================================================
+
+# Key 1  (valid until 2027-11-09)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wMSIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MTgyNTc0NjEyMjAwN30.iW0xdyHbJ_gGei-qOfGE1hZzXKtnmEyVIUKPJzws2F_c6GqQP0fAYQxYFDkqNDuNcPw_FOq48oU6yFS7rH6kBg
+
+# Key 2  (valid until 2028-11-08)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wMiIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MTg1NzI4MjEyMjAwN30.4fQ2_1QQfBSfpLN31-UHh9jE6JFebASWLNdTLNUVGr1CuVx3qbFHz8Rv2MdgtoH3DXrrUQyLyO8xLCev7jYuAA
+
+# Key 3  (valid until 2029-11-08)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wMyIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MTg4ODgxODEyMjAwN30.Hz8FTCpIyuvHx4fA8ynapQlJmZeAF2CV5MyeeLQ6MCuTZ4_MUBA4K5f33GcAQPUbjPlKUfVJNXAjCUa53WebCQ
+
+# Key 4  (valid until 2030-11-08)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wNCIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MTkyMDM1NDEyMjAwN30.M0mGKfkvC1uhBk6H_gNGU4D1b7nSXznLuAs_Crccr_APXJR4f41FnoerxVRnzR24G4fBpqXI76ApaoxTs-rMDA
+
+# Key 5  (valid until 2031-11-08)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wNSIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MTk1MTg5MDEyMjAwN30.JJMnlJ8-Ugnd8y2eyAt2XNPQN1Z7jNv5az38fF2q5iYAkXaVzReLLEpYlizNwWaswEb6NaidOyYaDEnorvpnAg
+
+# Key 6  (valid until 2032-11-07)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wNiIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MTk4MzQyNjEyMjAwN30.izGDeYwvSqd77HQwUW2swd0qsv4yzn-2aXAIS_lgMQ7bMhjf4qOH_pEwMCMODjftI2B2P8KemEakDAmmoin5CQ
+
+# Key 7  (valid until 2033-11-07)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wNyIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjAxNDk2MjEyMjAwN30.t5EbDynUVF0hyM7RTfDf94riVd8Oh55Z7uqrY26dNKVEiuajcAF_7jhWGdnz9cSl69HLoaswYs9sRyC9yJWwCg
+
+# Key 8  (valid until 2034-11-07)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wOCIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjA0NjQ5ODEyMjAwN30.nAK3d30bvHH3QDwQf22Jp4Ka478opg-sujR2wZM25_ZjkQqwcwRiX43_ZVybkuokeFfmmptdzIV1WPLIX7q0Cg
+
+# Key 9  (valid until 2035-11-07)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0wOSIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjA3ODAzNDEyMjAwN30.tiXd2HGUO69n5WDCrvvKAv0LWiQs17Fi7ERsaBw1e5tV34GtGc78Xx3gQOBTGKoxEnFuPhI5bNjmI2l12op9BA
+
+# Key 10  (valid until 2036-11-06)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0xMCIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjEwOTU3MDEyMjAwN30.jsr0TazBv4FxjQnywMMeKo0D-LJmOFFXmkO4aMfB1HRV3HLlUcpLaiFKva7APk3deifk67h98_-WmkoIudf5Cg
+
+# Key 11  (valid until 2037-11-06)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0xMSIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjE0MTEwNjEyMjAwN30.MCFOO8ocFJRS2XtLeP4wuffK1WDC4l3vnVakKc6GEuyQFtNqQSBCmWauxkf4yFxFx0Q-5VbpfHdV4xXdRmoQBQ
+
+# Key 12  (valid until 2038-11-06)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0xMiIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjE3MjY0MjEyMjAwN30.4SPCUmbgWXwH7DW5Afr54u7I6ZMzg8qVhgVqAgSBSAmFq7dnK2oQUvBAFu12Jcldom-63oIM0FytEMevtA-3Ag
+
+# Key 13  (valid until 2039-11-06)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0xMyIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjIwNDE3ODEyMjAwN30.g6gV7bhc3KqtyEJ6OGxgdagW_f4jHUsfWvOzNdQ5zFF1IEnGUjrGOsa5LotnJqdUVvZxyTxiyUlfzqk83qv6AA
+
+# Key 14  (valid until 2040-11-05)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0xNCIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjIzNTcxNDEyMjAwN30.PzvTwDRP8oLVUsVJ7Qf6WKewXjah0vls0UVibR-p99jvQftyWp8CCC9S4HmmoOJJ-8K4DyZhZv4yZov9o6kWAA
+
+# Key 15  (valid until 2041-11-05)
+eyJpZCI6Ik9GRi1tdzh5ZHFmci0xNSIsInBsYW4iOiIxeXItc3RlcCIsInR5cGUiOiJvZmZsaW5lIiwiaXNzdWVkQXQiOjE3OTQyMTAxMjIwMDcsImV4cGlyZXNBdCI6MjI2NzI1MDEyMjAwN30.QHcOxfeGpXuE0CJZmbbQsvbry8gSNyuNtkhrbh0tBGZG3OMLwFHVWS_DsO6_wFLpeg8zbPgKfnvURzp2a5HnDw
