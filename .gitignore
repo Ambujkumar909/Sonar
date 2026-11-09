@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+license-server/node_modules/
+
+# secrets — NEVER commit
+license-server/keys/
+ADMIN_CREDENTIALS.txt
+.env
+.env.*
+!.env.example
+
+# runtime data (private to a deployment)
+data/
+sessions/
+auth/
+logs/
+license-server/data/
+
+# build artifacts
+src/license.jsc
+src/sessionManager.jsc
+
+# proprietary / local-only
+*.pdf
+
+# misc
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# generated offline license keys — keep private
+license-keys.txt
+
+# offline license signing keys — keep PRIVATE
+keys/
+
+# confidential reference reports (real customer data) — keep local only
+00_Customer_Chat_Review_*.html
+customer-chat-review-*.html
