@@ -1,0 +1,37 @@
+# Sonar — single-server production stack (Postgres + app).
+# nginx on the host is the public door; the app listens on 127.0.0.1 only
+# (Docker bypasses ufw, so never publish 4545 on all interfaces).
+#
+#   docker compose -f docker-compose.server.yml up -d --build
+#
+# Never run "down -v": it deletes the pgdata volume (WhatsApp logins, license, all data).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    image: sonar:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - TZ=Asia/Kolkata
+    ports:
+      - "127.0.0.1:4545:4545"
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  pgdata:
