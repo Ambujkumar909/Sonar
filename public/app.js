@@ -848,51 +848,13 @@ async function refreshLicenseBanner() {
 async function renderLicense() {
   const { license: l } = await api('/license/status')
   state.license = l
-  const dotByStatus = { active: 'ok', disabled: 'ok', unlicensed: 'idle', unknown: 'idle' }
-  const dot = dotByStatus[l.status] || 'bad'
-  const exp = l.expiresAt ? fmtTime(l.expiresAt) : '—'
+  const ok = l.status === 'active' || l.status === 'disabled'
+  const line = l.expiresAt ? (l.status === 'expired' ? 'Expired on ' : 'Valid till ') + dayKey(l.expiresAt) : (LIC_LABEL[l.status] || l.status)
   $('#licenseStatusCard').innerHTML = `
-    <h3>License status</h3>
-    <div style="margin-bottom:14px"><span class="pill"><span class="dot ${dot}"></span>${LIC_LABEL[l.status] || l.status}</span></div>
-    <div id="licenseCountdown" data-exp="${l.expiresAt || ''}"></div>
-    <div class="kv" style="margin-top:14px">
-      <div class="k">Plan</div><div class="v">${esc(l.plan || '—')}</div>
-      <div class="k">Customer</div><div class="v">${esc(l.customer || '—')}</div>
-      <div class="k">Expires on</div><div class="v">${exp}</div>
-      <div class="k">Enforcement</div><div class="v">${l.enabled ? 'On' : 'Off (dev)'}</div>
-      <div class="k">Offline window</div><div class="v">${l.graceHours}h</div>
-    </div>
-    ${l.detail ? `<p style="margin-top:10px;color:var(--ink-faint);font-size:13px">${esc(l.detail)}</p>` : ''}`
-  tickCountdown()
-  $('#licenseMachineCard').innerHTML = `
-    <h3>This machine</h3>
-    <div class="kv">
-      <div class="k">Host</div><div class="v">${esc(l.machine?.host || '—')}</div>
-      <div class="k">Platform</div><div class="v">${esc((l.machine?.platform || '') + ' ' + (l.machine?.arch || ''))}</div>
-      <div class="k">CPUs</div><div class="v">${l.machine?.cpus || '—'}</div>
-    </div>
-    <div class="k" style="margin-top:12px;color:var(--ink-faint);font-size:12px">Machine fingerprint</div>
-    <div style="font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;color:var(--ink-soft)">${esc(l.fingerprint || '')}</div>`
+    <h3>License</h3>
+    <div class="lic-valid ${ok ? '' : 'bad'}">${esc(line)}</div>`
   // activation is available to admin + super_admin
   $('#licenseActivateCard').style.display = isAdminish() ? '' : 'none'
-}
-function tickCountdown() {
-  const el = $('#licenseCountdown'); if (!el) return
-  const exp = Number(el.dataset.exp)
-  if (!exp) { el.innerHTML = '<div class="countdown-num">—</div>'; return }
-  let ms = exp - Date.now()
-  if (ms <= 0) { el.innerHTML = '<div class="countdown over">Expired</div>'; return }
-  const d = Math.floor(ms / 86400000); ms -= d * 86400000
-  const h = Math.floor(ms / 3600000); ms -= h * 3600000
-  const m = Math.floor(ms / 60000); ms -= m * 60000
-  const s = Math.floor(ms / 1000)
-  const cls = d > 7 ? 'ok' : d >= 2 ? 'warn' : 'bad'
-  el.innerHTML = `<div class="countdown ${cls}">
-    <div class="cu"><span class="n">${d}</span><span class="l">days</span></div>
-    <div class="cu"><span class="n">${String(h).padStart(2,'0')}</span><span class="l">hrs</span></div>
-    <div class="cu"><span class="n">${String(m).padStart(2,'0')}</span><span class="l">min</span></div>
-    <div class="cu"><span class="n">${String(s).padStart(2,'0')}</span><span class="l">sec</span></div>
-  </div><div class="cu-sub">remaining on this plan</div>`
 }
 function bindLicense() {
   $('#activateBtn').onclick = async () => {
@@ -966,7 +928,7 @@ function showUser(me) {
   $$('#nav button').forEach(b => {
     if (b.dataset.view === 'audit') b.style.display = isSuper() ? '' : 'none'
     if (b.dataset.view === 'users') b.style.display = isAdminish() ? '' : 'none'
-    if (b.dataset.view === 'license') b.style.display = isAdminish() ? '' : 'none' // admin + super see countdown
+    if (b.dataset.view === 'license') b.style.display = isAdminish() ? '' : 'none' // admin + super only
     if (b.dataset.view === 'emails') b.style.display = isAdminish() ? '' : 'none' // report recipients → admin only
     if (b.dataset.view === 'scheduler') b.style.display = isAdminish() ? '' : 'none' // schedule config → admin only
   })
@@ -996,7 +958,6 @@ function startApp(me) {
   bindUserForms()
   bindLicense()
   refreshLicenseBanner()
-  setInterval(() => { if (state.view === 'license') tickCountdown() }, 1000) // live countdown
   go(location.hash.slice(1) || 'dashboard')
   // Surface pending new-group alerts from any landing view (admins only).
   loadPendingGroups().then(updateNewGroupBadge)
