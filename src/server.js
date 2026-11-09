@@ -332,8 +332,8 @@ app.post('/api/report-emails/send-test', auth.requireUserAdmin, wrap(async (req,
   auth.audit(req, 'report.send_test', to.join(','))
   try {
     await mailer.sendReport({
-      to, subject: "D'Decor — Customer Chat Review (SAMPLE / test email)",
-      bodyHtml: `<div style="font-family:'Segoe UI',Arial,sans-serif"><p>This is a <b>sample test email</b> from Sonar to confirm delivery and formatting. The full sample report (with charts) is attached — open it in a browser.</p></div>`,
+      to, subject: 'Customer Chat Review (SAMPLE / test email)',
+      bodyHtml: scheduler.emailBody(sample.summary, sample.stats, 'This is a sample test email from Sonar to confirm delivery and formatting. The full sample report (with charts) is attached — open it in a browser.'),
       attachmentHtml: sample.html, filename: 'sample-customer-chat-review.html',
     })
     ok(res, { emailed: to.length, to })

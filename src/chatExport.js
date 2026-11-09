@@ -6,30 +6,15 @@
 // =============================================================
 const store = require('./store')
 
-// ---- channel segments (COCO / FOFO / MBO) ----
-// Watchlist groups carry the channel in their NAME (e.g. "FOFO-DCA MARKETING,
-// CHANDIGARH 10002716"). coco wins if a name somehow contains both; MBO is
-// everything else — so the three segments always partition all messages.
-const NAME_COL = "COALESCE(NULLIF(chat_name, ''), chat_jid)"
-function segmentCond(segment) {
-  if (segment === 'coco') return `${NAME_COL} ILIKE '%coco%'`
-  if (segment === 'fofo') return `${NAME_COL} ILIKE '%fofo%' AND ${NAME_COL} NOT ILIKE '%coco%'`
-  if (segment === 'mbo') return `${NAME_COL} NOT ILIKE '%coco%' AND ${NAME_COL} NOT ILIKE '%fofo%'`
-  return null
-}
-
 const IST = (ms) => new Date(Number(ms)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
-const who = (m) => (m.from_me ? "ME (D'Decor team)" : (m.sender_name || 'dealer'))
+const who = (m) => (m.from_me ? "ME (team)" : (m.sender_name || 'dealer'))
 const fmt = (m) => `[${IST(m.ts)}] ${who(m)}: ${m.has_media && !m.text ? '[media]' : String(m.text || '').replace(/\r?\n/g, ' ')}`
 
 // ids: undefined = all; [] = none; [..] scoped. days: null = all. cap: max chars (0 = no cap).
-// segment: null = all; 'coco'|'fofo'|'mbo' = only that channel's groups.
-async function buildTranscript({ ids, days = null, cap = 0, generatedAt = Date.now(), segment = null } = {}) {
+async function buildTranscript({ ids, days = null, cap = 0, generatedAt = Date.now() } = {}) {
   const scoped = Array.isArray(ids)
   if (scoped && ids.length === 0) return { text: '', chats: 0, messages: 0, truncated: false }
   const conds = [], p = []
-  const sc = segmentCond(segment)
-  if (sc) conds.push(`(${sc})`)
   if (scoped) { p.push(ids); conds.push(`session_id = ANY($${p.length})`) }
   if (days) { p.push(generatedAt - days * 86400000); conds.push(`ts >= $${p.length}`) }
   const where = conds.length ? ' WHERE ' + conds.join(' AND ') : ''
@@ -50,4 +35,4 @@ async function buildTranscript({ ids, days = null, cap = 0, generatedAt = Date.n
   return { text: text.trim(), chats: byChat.size, messages: rows.length, truncated }
 }
 
-module.exports = { buildTranscript, segmentCond }
+module.exports = { buildTranscript }
