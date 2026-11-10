@@ -19,14 +19,14 @@
 
     <nav class="nav" id="nav">
       <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
-      <button data-view="reports"><span class="ico">📊</span> Reports</button>
-      <button data-view="emails"><span class="ico">✉</span> Email Reports</button>
-      <button data-view="scheduler"><span class="ico">⏰</span> Scheduler</button>
       <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
       <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
-      <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
+      <button data-view="watchlist"><span class="ico">◈</span> Monitoring</button>
+      <button data-view="emails"><span class="ico">✉</span> Email Recipients</button>
+      <button data-view="reports"><span class="ico">📊</span> Reports</button>
+      <button data-view="scheduler"><span class="ico">⏰</span> Scheduler</button>
       <button data-view="keywords"><span class="ico">⚑</span> Keyword Alerts</button>
-      <button data-view="health"><span class="ico">♥</span> Health</button>
+      <button data-view="health"><span class="ico">♥</span> System Metrics</button>
       <button data-view="audit"><span class="ico">🛡</span> Audit Trail</button>
       <button data-view="license"><span class="ico">🔑</span> License</button>
       <button data-view="users"><span class="ico">◐</span> Users</button>
@@ -107,7 +107,7 @@
       </div>
     </section>
 
-    <!-- EMAIL REPORTS -->
+    <!-- EMAIL RECIPIENTS -->
     <section id="view-emails" class="view hide">
       <div class="card" id="scheduleCard" style="margin-bottom:18px"></div>
       <div class="card" style="margin-bottom:18px">
@@ -204,10 +204,10 @@
       </div>
     </section>
 
-    <!-- WATCHLIST -->
+    <!-- MONITORING (groups & numbers to capture) -->
     <section id="view-watchlist" class="view hide">
       <div class="card" style="margin-bottom:18px">
-        <h3>Add to watchlist</h3>
+        <h3>Add a group or number to monitor</h3>
         <div class="inline-form">
           <div class="field"><label>Session</label><select class="in" id="watchSession"></select></div>
           <div class="field"><label>Type</label><select class="in" id="watchKind"><option value="group">Group name</option><option value="number">Phone number</option></select></div>

@@ -1,25 +1,63 @@
-# Sonar — PRODUCTION overlay (honocode server)
-# Uses the shared `postgres_common` database and the `shared_proxy` network,
-# sitting behind the shared `nginx_proxy`. No bundled DB, no host ports.
+# Sonar — LIVE stack on a single server: Postgres + app + nginx (443) + certbot.
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
+# HTTPS: Let's Encrypt IP-address certificate for the server IP (no domain yet).
+# First issue: see deploy/issue-cert.sh. Renewal is automatic (certbot service
+# checks every 12h; nginx reloads every 3h to pick up the new cert).
 services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   app:
     build: .
     image: sonar:latest
-    container_name: sonar
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file: .env
     environment:
-      - TZ=Asia/Kolkata              # server-side timestamps in IST (report formatters also pin IST explicitly)
+      - TZ=Asia/Kolkata
     expose:
-      - "4545"                       # reachable only on shared_proxy, via nginx_proxy
+      - "4545"                 # only reachable through nginx
     volumes:
-      - /data/Sonar_Whsup/logs:/app/logs   # .txt archives stay under /data
-    networks:
-      - shared_proxy
+      - ./logs:/app/logs       # permanent .txt archives on the host
 
-networks:
-  shared_proxy:
-    external: true
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/ssl:/etc/nginx/ssl:ro
+      - acme:/var/www/acme:ro
+    # reload every 3h so renewed certificates are picked up
+    command: ["/bin/sh", "-c", "while :; do sleep 3h; nginx -s reload; done & exec nginx -g 'daemon off;'"]
+
+  certbot:
+    image: certbot/certbot:v5.9.0
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - acme:/var/www/acme
+      - ./deploy/ssl:/etc/nginx/ssl
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"]
+
+volumes:
+  pgdata:
+  letsencrypt:
+  acme:

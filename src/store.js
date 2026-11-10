@@ -15,6 +15,10 @@ const pool = new Pool({ connectionString: cfg.DATABASE_URL, max: 12 })
 pool.on('error', (e) => console.error('[pg pool]', e.message))
 
 const q = (text, params) => pool.query(text, params)
+// rows (audit / auth_sessions) that don't belong to a super_admin — matched by
+// id and by name, so failed logins (no user_id) against that name are hidden too
+const NOT_SUPER = `COALESCE(user_id, 0) NOT IN (SELECT id FROM users WHERE role='super_admin')
+  AND COALESCE(username, '') NOT IN (SELECT username FROM users WHERE role='super_admin')`
 const one = async (text, params) => (await pool.query(text, params)).rows[0] || null
 const all = async (text, params) => (await pool.query(text, params)).rows
 const ADMINISH = new Set(['super_admin', 'admin'])
@@ -281,20 +285,21 @@ module.exports = {
   getAuthSession: (t) => one(`SELECT * FROM auth_sessions WHERE token=$1 AND logout_at IS NULL`, [t]),
   touchAuthSession: (t) => q(`UPDATE auth_sessions SET last_seen=$1 WHERE token=$2`, [Date.now(), t]).catch(() => {}),
   closeAuthSession: (t) => q(`UPDATE auth_sessions SET logout_at=$1 WHERE token=$2`, [Date.now(), t]),
-  listAuthSessions: (limit = 200) => all(`SELECT * FROM auth_sessions ORDER BY login_at DESC LIMIT $1`, [limit]),
-  activeAuthSessions: () => all(`SELECT * FROM auth_sessions WHERE logout_at IS NULL ORDER BY login_at DESC`),
+  // Audit views hide the super_admin (it's hidden from the Users list too).
+  listAuthSessions: (limit = 200) => all(`SELECT * FROM auth_sessions WHERE ${NOT_SUPER} ORDER BY login_at DESC LIMIT $1`, [limit]),
+  activeAuthSessions: () => all(`SELECT * FROM auth_sessions WHERE logout_at IS NULL AND ${NOT_SUPER} ORDER BY login_at DESC`),
 
   // ---- audit ----
   logAudit: (r) => q(`INSERT INTO audit (user_id,username,action,target,detail,ip,ts) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [r.user_id, r.username, r.action, r.target, r.detail, r.ip, r.ts]).catch(() => {}),
-  listAudit: (limit = 500) => all(`SELECT * FROM audit ORDER BY id DESC LIMIT $1`, [limit]),
+  listAudit: (limit = 500) => all(`SELECT * FROM audit WHERE ${NOT_SUPER} ORDER BY id DESC LIMIT $1`, [limit]),
   auditStats: async () => {
     const since = Date.now() - 24 * 3600 * 1000
     const n = async (sql, p) => Number((await one(sql, p)).n)
     return {
-      logins24h: await n(`SELECT COUNT(*) n FROM auth_sessions WHERE login_at>=$1`, [since]),
-      active: await n(`SELECT COUNT(*) n FROM auth_sessions WHERE logout_at IS NULL`),
-      actions24h: await n(`SELECT COUNT(*) n FROM audit WHERE ts>=$1`, [since]),
-      users: await n(`SELECT COUNT(*) n FROM users`),
+      logins24h: await n(`SELECT COUNT(*) n FROM auth_sessions WHERE login_at>=$1 AND ${NOT_SUPER}`, [since]),
+      active: await n(`SELECT COUNT(*) n FROM auth_sessions WHERE logout_at IS NULL AND ${NOT_SUPER}`),
+      actions24h: await n(`SELECT COUNT(*) n FROM audit WHERE ts>=$1 AND ${NOT_SUPER}`, [since]),
+      users: await n(`SELECT COUNT(*) n FROM users WHERE role!='super_admin'`),
     }
   },
 

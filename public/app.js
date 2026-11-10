@@ -1,6 +1,6 @@
 /* =============================================================
    Sonar — dashboard client
-   Clean, calm UI. All reconnect/error noise stays on the Health
+   Clean, calm UI. All reconnect/error noise stays on the System Metrics
    page; the main dashboard shows only what matters.
    ============================================================= */
 const $ = (s, r = document) => r.querySelector(s)
@@ -34,7 +34,7 @@ const urlTheme = new URLSearchParams(location.search).get('theme')
 applyTheme(urlTheme || localStorage.getItem('sonar-theme') || 'light')
 
 /* ---------- navigation ---------- */
-const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Reports', scheduler: 'Scheduler', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Watchlist', keywords: 'Keyword Alerts', health: 'Health', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
+const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Recipients', scheduler: 'Scheduler', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Monitoring', keywords: 'Keyword Alerts', health: 'System Metrics', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
 function go(view) {
   if (!TITLES[view]) view = 'dashboard'
   // route guards (defence in depth — API enforces too)
@@ -97,7 +97,7 @@ function initSocket() {
     if (state.newGroups.some(x => x.jid === g.jid && x.sessionId === g.sessionId)) return
     state.newGroups.unshift(g)
     const sname = (state.sessions.find(s => s.id === g.sessionId) || {}).name || 'a session'
-    toast(`👥 New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to add it to your watchlist.</span>`, 'alert')
+    toast(`👥 New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to start monitoring it.</span>`, 'alert')
     renderNewGroupBanner(); updateNewGroupBadge()
   })
 }
@@ -203,7 +203,7 @@ function renderNewGroupBanner() {
     <div style="display:flex;flex-direction:column;gap:10px">${
     state.newGroups.map(g => `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:12px">
       <div style="flex:1;min-width:180px"><b>${esc(g.subject)}</b> <span style="color:var(--ink-faint);font-size:12.5px">· ${g.participants || 0} members · ${esc(nameById[g.sessionId] || g.sessionId)}</span></div>
-      <button class="btn primary" data-act="addgroupwatch" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">＋ Add to watchlist</button>
+      <button class="btn primary" data-act="addgroupwatch" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">＋ Monitor this group</button>
       <button class="btn" data-act="dismissgroup" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">Dismiss</button>
     </div>`).join('')}</div>`
 }
@@ -606,7 +606,7 @@ function drawWatchTable(watch, nameById, sizeMap) {
     + `<th class="th-sort" data-act="sortwatch" data-key="members">Members${ind('members')}</th>`
     + `<th></th></tr></thead><tbody>${
     rows.length ? rows.map(w => `<tr><td>${esc(nameById[w.session_id] || w.session_id)}</td><td>${w.kind}</td><td><b>${esc(w.value)}</b></td><td>${memCell(w)}</td><td><button class="btn danger" data-act="delwatch" data-id="${w.id}">Remove</button></td></tr>`).join('')
-    : '<tr><td colspan="5"><div class="empty">Watchlist empty — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
+    : '<tr><td colspan="5"><div class="empty">Nothing is being monitored yet — nothing is logged until you add a group name or number.</div></td></tr>'}</tbody>`
 }
 async function renderWatchlist() {
   fillSessionSelect($('#watchSession'))
@@ -641,12 +641,12 @@ $('#addWatchBtn').onclick = async () => {
     }
     if (existing.some(w => w.value === value)) {
       state.watchPicked = null; $('#watchValue').value = ''; renderWatchlist()
-      return toast('Already on the watchlist')
+      return toast('Already being monitored')
     }
   }
   const r = await post('/watch', { sid, kind, value })
   if (r && r.ok === false) return toast(r.error || 'Could not add', 'err')
-  state.watchPicked = null; $('#watchValue').value = ''; toast('Added to watchlist'); renderWatchlist()
+  state.watchPicked = null; $('#watchValue').value = ''; toast('Added to monitoring'); renderWatchlist()
 }
 $('#watchValue').oninput = () => { state.watchPicked = null } // manual edit drops the authoritative pick
 $('#fetchGroupsBtn').onclick = async () => {
@@ -909,7 +909,7 @@ window.addGroupWatch = async (sid, jid) => {
   if (!g) return
   const r = await post('/watch', { sid, kind: 'group', value: g.subject })
   if (r && r.ok === false) return toast(r.error || 'Could not add', 'err')
-  dropNewGroup(sid, jid); toast(`Added <b>${esc(g.subject)}</b> to watchlist`)
+  dropNewGroup(sid, jid); toast(`Added <b>${esc(g.subject)}</b> to monitoring`)
   if (state.view === 'watchlist') renderWatchlist()
 }
 

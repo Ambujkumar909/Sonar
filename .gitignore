@@ -39,3 +39,6 @@ keys/
 # confidential reference reports (real customer data) — keep local only
 00_Customer_Chat_Review_*.html
 customer-chat-review-*.html
+
+# live TLS certificate files (issued by certbot)
+deploy/ssl/
