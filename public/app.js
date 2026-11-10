@@ -34,7 +34,7 @@ const urlTheme = new URLSearchParams(location.search).get('theme')
 applyTheme(urlTheme || localStorage.getItem('sonar-theme') || 'light')
 
 /* ---------- navigation ---------- */
-const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Recipients', scheduler: 'Scheduler', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Monitoring', keywords: 'Keyword Alerts', health: 'System Metrics', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
+const TITLES = { dashboard: 'Dashboard', reports: 'Reports', emails: 'Email Recipients', scheduler: 'Scheduler', sessions: 'Sessions', chats: 'Recent Chats', watchlist: 'Groups Mgmt', keywords: 'Keyword Alerts', health: 'System Metrics', audit: 'Audit Trail', license: 'License', users: 'Users', files: 'Log Files', about: 'About' }
 function go(view) {
   if (!TITLES[view]) view = 'dashboard'
   // route guards (defence in depth — API enforces too)
