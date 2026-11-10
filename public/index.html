@@ -1,12 +1,43 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Sonar — WhatsApp Intelligence</title>
+<title>Sonar | WhatsApp Intelligence</title>
 <link rel="icon" type="image/png" href="/assets/favicon.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Castoro&family=Hanken+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/styles.css" />
 
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20"/><circle cx="9.5" cy="7.5" r="3.5"/><path d="M21 20v-1.5a4 4 0 0 0-3-3.85M15.5 4.1a3.5 3.5 0 0 1 0 6.8"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M8 16v-4M12.5 16V8M17 16v-7"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9Z"/><path d="M10.3 20.5a1.9 1.9 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M21 12h-4l-3 8-4-16-3 8H3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 21s7-3.2 7-9V5.5L12 3 5 5.5V12c0 5.8 7 9 7 9Z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="m11.2 11.8 8.3-8.3M16.5 6.5l2.5 2.5M14.5 8.5l2 2"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5v14l11-7Z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.01M14.5 20.5h6v-3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5-7.5-4Z"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-8 8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 20.5H5.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2H9M15.5 16.5 20 12l-4.5-4.5M20 12H9"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4M12 17v.01"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".75"/></symbol>
+</svg>
 <div class="app">
   <!-- ===================== SIDEBAR ===================== -->
   <aside class="sidebar">
@@ -15,23 +46,23 @@
       <img class="brand-logo theme-dark-only" src="/assets/logo-dark.png" alt="Sonar" />
     </div>
 
-    <div class="readonly-badge"><span class="dot"></span> Observe-only · never sends</div>
+    <div class="readonly-badge"><svg class="i" aria-hidden="true"><use href="#i-eye"></use></svg> Observe only, never sends</div>
 
     <nav class="nav" id="nav">
-      <button data-view="dashboard" class="active"><span class="ico">◎</span> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
-      <button data-view="reports"><span class="ico">📊</span> Reports</button>
-      <button data-view="emails"><span class="ico">✉</span> Email Reports</button>
-      <button data-view="scheduler"><span class="ico">⏰</span> Scheduler</button>
-      <button data-view="sessions"><span class="ico">⬡</span> Sessions <span class="badge" id="navSessions">0</span></button>
-      <button data-view="chats"><span class="ico">✦</span> Recent Chats</button>
-      <button data-view="watchlist"><span class="ico">◈</span> Watchlist</button>
-      <button data-view="keywords"><span class="ico">⚑</span> Keyword Alerts</button>
-      <button data-view="health"><span class="ico">♥</span> Health</button>
-      <button data-view="audit"><span class="ico">🛡</span> Audit Trail</button>
-      <button data-view="license"><span class="ico">🔑</span> License</button>
-      <button data-view="users"><span class="ico">◐</span> Users</button>
-      <button data-view="files"><span class="ico">▤</span> Log Files</button>
-      <button data-view="about"><span class="ico">ⓘ</span> About</button>
+      <button data-view="dashboard" class="active"><svg class="i" aria-hidden="true"><use href="#i-dashboard"></use></svg> Dashboard <span class="badge warn hide" id="navNewGroups">0</span></button>
+      <button data-view="sessions"><svg class="i" aria-hidden="true"><use href="#i-phone"></use></svg> Sessions <span class="badge" id="navSessions">0</span></button>
+      <button data-view="chats"><svg class="i" aria-hidden="true"><use href="#i-chat"></use></svg> Recent Chats</button>
+      <button data-view="watchlist"><svg class="i" aria-hidden="true"><use href="#i-users"></use></svg> Groups Mgmt</button>
+      <button data-view="emails"><svg class="i" aria-hidden="true"><use href="#i-mail"></use></svg> Email Recipients</button>
+      <button data-view="reports"><svg class="i" aria-hidden="true"><use href="#i-chart"></use></svg> Reports</button>
+      <button data-view="scheduler"><svg class="i" aria-hidden="true"><use href="#i-clock"></use></svg> Scheduler</button>
+      <button data-view="keywords"><svg class="i" aria-hidden="true"><use href="#i-bell"></use></svg> Keyword Alerts</button>
+      <button data-view="health"><svg class="i" aria-hidden="true"><use href="#i-pulse"></use></svg> System Metrics</button>
+      <button data-view="audit"><svg class="i" aria-hidden="true"><use href="#i-shield"></use></svg> Audit Trail</button>
+      <button data-view="license"><svg class="i" aria-hidden="true"><use href="#i-key"></use></svg> License</button>
+      <button data-view="users"><svg class="i" aria-hidden="true"><use href="#i-user"></use></svg> Users</button>
+      <button data-view="files"><svg class="i" aria-hidden="true"><use href="#i-file"></use></svg> Log Files</button>
+      <button data-view="about"><svg class="i" aria-hidden="true"><use href="#i-info"></use></svg> About</button>
     </nav>
 
     <div class="foot">
@@ -49,7 +80,7 @@
       <h1 id="pageTitle">Dashboard</h1>
       <div class="spacer"></div>
       <div class="search">
-        <span>⌕</span>
+        <svg class="i" aria-hidden="true"><use href="#i-search"></use></svg>
         <input id="globalSearch" placeholder="Search every message…" />
       </div>
       <div class="pill" id="healthPill"><span class="dot ok"></span> <span id="healthText">All systems silent</span></div>
@@ -61,17 +92,17 @@
       <div class="grid cols-3" id="statCards"></div>
       <div class="grid cols-2" style="margin-top:18px">
         <div class="card">
-          <h3>Messages · last 24 hours</h3>
+          <h2>Messages, last 24 hours</h2>
           <div class="bars" id="hourlyBars"></div>
           <div class="bar-axis" id="hourlyAxis"></div>
         </div>
         <div class="card">
-          <h3>Most active chats</h3>
+          <h2>Most active chats</h2>
           <div id="topChats"></div>
         </div>
       </div>
       <div class="card" style="margin-top:18px">
-        <h3>Live feed</h3>
+        <h2>Live feed</h2>
         <div class="feed" id="liveFeed"><div class="empty">Waiting for incoming messages…</div></div>
       </div>
     </section>
@@ -80,9 +111,9 @@
     <section id="view-reports" class="view hide">
       <div class="card" style="margin-bottom:18px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <h3 style="margin:0">WhatsApp Activity Report</h3>
+          <h2 style="margin:0">WhatsApp Activity Report</h2>
           <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <select class="in" id="reportDays" style="padding:8px 10px">
+            <select class="in" id="reportDays">
               <option value="2">Last 2 days</option>
               <option value="3">Last 3 days</option>
               <option value="5">Last 5 days</option>
@@ -91,31 +122,31 @@
               <option value="30">Last 30 days</option>
               <option value="all">All captured</option>
             </select>
-            <button class="btn" id="reportMetrics">📊 View metrics</button>
-            <a class="btn" id="reportDownload" href="#">⬇ Download chat data</a>
-            <button class="btn primary" id="reportAi" style="display:none">✨ Generate AI report</button>
+            <button class="btn" id="reportMetrics"><svg class="i" aria-hidden="true"><use href="#i-chart"></use></svg>View metrics</button>
+            <a class="btn" id="reportDownload" href="#"><svg class="i" aria-hidden="true"><use href="#i-download"></use></svg>Download chat data</a>
+            <button class="btn primary" id="reportAi" style="display:none">Generate AI report</button>
           </div>
         </div>
-        <p style="margin:10px 0 0;font-size:13px;color:var(--ink-soft)"><b>View metrics</b> is free and live. <b>⬇ Download chat data</b> saves the raw chat transcripts for the selected window (for offline analysis in Claude Code — no API cost). <b>✨ Generate AI report</b> confirms first, runs the Claude analysis once, and saves it under <b>Saved AI reports</b> below — open/download it there without regenerating. <span id="reportStatus" style="color:var(--warn);font-weight:700"></span></p>
+        <p style="margin:12px 0 0;font-size:14px;line-height:1.6;color:var(--ink-soft);max-width:860px"><b>View metrics</b> is free and live. <b>Download chat data</b> saves the raw chat transcripts for the selected window (for offline analysis in Claude Code, no API cost). <b>Generate AI report</b> confirms first, runs the Claude analysis once, and saves it under <b>Saved AI reports</b> below, where you can open or download it without regenerating. <span id="reportStatus" style="color:var(--warn);font-weight:600"></span></p>
       </div>
       <div class="card admin-only" id="savedReportsCard" style="margin-bottom:18px">
-        <h3>Saved AI reports</h3>
+        <h2>Saved AI reports</h2>
         <div class="tablewrap"><table id="savedReportsTable"></table></div>
       </div>
       <div class="card" style="padding:0;overflow:hidden">
-        <iframe id="reportFrame" title="WhatsApp Activity Report" style="width:100%;height:calc(100vh - 280px);min-height:420px;border:0;background:#fff;border-radius:14px;display:block"></iframe>
+        <iframe id="reportFrame" title="WhatsApp Activity Report" style="width:100%;height:calc(100vh - 280px);min-height:420px;border:0;background:var(--qr-bg);border-radius:16px;display:block"></iframe>
       </div>
     </section>
 
-    <!-- EMAIL REPORTS -->
+    <!-- EMAIL RECIPIENTS -->
     <section id="view-emails" class="view hide">
       <div class="card" id="scheduleCard" style="margin-bottom:18px"></div>
       <div class="card" style="margin-bottom:18px">
-        <h3>Add report recipient</h3>
+        <h2>Add report recipient</h2>
         <div class="inline-form">
           <div class="field" style="flex:1"><label>Email address</label><input class="in" id="emailAddr" placeholder="name@company.com" /></div>
           <div class="field" style="flex:1"><label>Label (optional)</label><input class="in" id="emailLabel" placeholder="e.g. Sales Head" /></div>
-          <button class="btn primary" id="addEmailBtn">＋ Add</button>
+          <button class="btn primary" id="addEmailBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"></use></svg>Add</button>
         </div>
         <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">The daily report is emailed to every <b>enabled</b> recipient. Toggle a recipient off to temporarily stop sending to them without removing them.</p>
       </div>
@@ -126,11 +157,11 @@
     <section id="view-scheduler" class="view hide">
       <div class="card" id="schedNextCard" style="margin-bottom:18px"></div>
       <div class="card">
-        <h3>Report schedule</h3>
+        <h2>Report schedule</h2>
         <p style="font-size:13.5px;color:var(--ink-soft);margin:6px 0 16px">Configure when the report runs and how much it covers. Changes apply immediately.</p>
         <div class="inline-form" style="align-items:flex-end;flex-wrap:wrap;gap:16px">
           <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="schedEnabled" /> <b>Enabled</b></label>
-          <div class="field"><label>Run at time(s) — 24h, comma-separated</label><input class="in" id="schedTimes" placeholder="14:00, 19:00" /></div>
+          <div class="field"><label>Run at time(s), 24h, comma-separated</label><input class="in" id="schedTimes" placeholder="14:00, 19:00" /></div>
         </div>
         <div class="inline-form" style="align-items:flex-end;flex-wrap:wrap;gap:16px;margin-top:14px">
           <div class="field"><label>Frequency</label>
@@ -164,10 +195,10 @@
     <!-- SESSIONS -->
     <section id="view-sessions" class="view hide">
       <div class="card" style="margin-bottom:18px">
-        <h3>Connect a new device</h3>
+        <h2>Connect a new device</h2>
         <div class="inline-form">
           <div class="field"><label>Session name</label><input class="in" id="newSessionName" placeholder="e.g. Sales Phone" /></div>
-          <button class="btn primary" id="addSessionBtn">＋ Create & show QR</button>
+          <button class="btn primary" id="addSessionBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"></use></svg>Create &amp; show QR</button>
         </div>
       </div>
       <div class="grid cols-3" id="sessionCards"></div>
@@ -188,7 +219,7 @@
               <button class="seg" data-seg="group">Groups</button>
               <button class="seg" data-seg="direct">Direct</button>
             </div>
-            <div class="chat-search"><span>⌕</span><input id="chatFilter" placeholder="Search name…" /></div>
+            <div class="chat-search"><svg class="i" aria-hidden="true"><use href="#i-search"></use></svg><input id="chatFilter" placeholder="Search name…" /></div>
           </div>
           <div class="chat-list" id="chatList"></div>
         </div>
@@ -199,28 +230,28 @@
           <div class="messages" id="chatMessages">
             <div class="empty">Pick a conversation from the left to read its history.</div>
           </div>
-          <div class="readonly-note">🔒 Read-only — Sonar never sends messages or read receipts</div>
+          <div class="readonly-note"><svg class="i" aria-hidden="true"><use href="#i-lock"></use></svg>Read-only. Sonar never sends messages or read receipts</div>
         </div>
       </div>
     </section>
 
-    <!-- WATCHLIST -->
+    <!-- MONITORING (groups & numbers to capture) -->
     <section id="view-watchlist" class="view hide">
       <div class="card" style="margin-bottom:18px">
-        <h3>Add to watchlist</h3>
+        <h2>Add a group or number to monitor</h2>
         <div class="inline-form">
           <div class="field"><label>Session</label><select class="in" id="watchSession"></select></div>
           <div class="field"><label>Type</label><select class="in" id="watchKind"><option value="group">Group name</option><option value="number">Phone number</option></select></div>
           <div class="field" style="flex:1"><label>Value</label><input class="in" id="watchValue" placeholder="Group name, or number like 919812345678" /></div>
-          <button class="btn primary" id="addWatchBtn">＋ Add</button>
+          <button class="btn primary" id="addWatchBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"></use></svg>Add</button>
         </div>
         <div class="inline-form" id="groupPickRow" style="margin-top:10px">
           <div class="field" style="flex:1"><label>Or pick a group from this session</label>
-            <select class="in" id="watchGroupSelect"><option value="">— fetch groups, then choose —</option></select>
+            <select class="in" id="watchGroupSelect"><option value="">Fetch groups, then choose</option></select>
           </div>
-          <button class="btn" id="fetchGroupsBtn" type="button">⟳ Fetch groups</button>
+          <button class="btn" id="fetchGroupsBtn" type="button"><svg class="i" aria-hidden="true"><use href="#i-refresh"></use></svg>Fetch groups</button>
         </div>
-        <p style="margin-top:10px;font-size:13.5px;color:var(--ink-soft)">Tip: pick a <b>group</b> from the dropdown above (click <b>Fetch groups</b> after the session is linked) instead of typing it. For a phone number, type the country code + number as <b>digits only</b> — e.g. <b>919812345678</b> (no <b>+</b>, spaces, or symbols).</p>
+        <p style="margin-top:12px;font-size:14px;line-height:1.6;color:var(--ink-soft)">Tip: pick a <b>group</b> from the dropdown above (click <b>Fetch groups</b> after the session is linked) instead of typing it. For a phone number, type the country code + number as <b>digits only</b>, e.g. <b>919812345678</b> (no <b>+</b>, spaces, or symbols).</p>
       </div>
       <div class="card tablewrap"><table id="watchTable"></table></div>
     </section>
@@ -228,20 +259,20 @@
     <!-- KEYWORDS -->
     <section id="view-keywords" class="view hide">
       <div class="card" style="margin-bottom:18px">
-        <h3>Keyword alerts</h3>
+        <h2>Keyword alerts</h2>
         <div class="inline-form">
           <div class="field" style="flex:1"><label>Keyword (case-insensitive)</label><input class="in" id="keywordValue" placeholder="e.g. quote, price, order, refund…" /></div>
-          <button class="btn primary" id="addKeywordBtn">＋ Add keyword</button>
+          <button class="btn primary" id="addKeywordBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"></use></svg>Add keyword</button>
         </div>
       </div>
-      <div class="card"><h3>Active keywords</h3><div class="chips" id="keywordChips"></div></div>
+      <div class="card"><h2>Active keywords</h2><div class="chips" id="keywordChips"></div></div>
     </section>
 
     <!-- HEALTH (the silent operational log lives here, out of the way) -->
     <section id="view-health" class="view hide">
       <div class="grid cols-4" id="healthStats" style="margin-bottom:18px"></div>
       <div class="card">
-        <h3>Resilience log · every reconnect & error, handled silently</h3>
+        <h2>Resilience log: every reconnect and error, handled silently</h2>
         <div class="events" id="eventList"></div>
       </div>
     </section>
@@ -250,15 +281,15 @@
     <section id="view-audit" class="view hide">
       <div class="grid cols-4" id="auditStats" style="margin-bottom:18px"></div>
       <div class="card" style="margin-bottom:18px">
-        <h3>Active sessions · who is logged in right now</h3>
+        <h2>Active sessions: who is logged in right now</h2>
         <div class="tablewrap"><table id="activeTable"></table></div>
       </div>
       <div class="card" style="margin-bottom:18px">
-        <h3>Login history · duration per session</h3>
+        <h2>Login history: duration per session</h2>
         <div class="tablewrap"><table id="loginTable"></table></div>
       </div>
       <div class="card">
-        <h3>Action log · everything every user has done</h3>
+        <h2>Action log: everything every user has done</h2>
         <div class="tablewrap"><table id="auditTable"></table></div>
       </div>
     </section>
@@ -266,22 +297,22 @@
     <!-- USERS -->
     <section id="view-users" class="view hide">
       <div class="card admin-only" id="addUserCard" style="margin-bottom:18px">
-        <h3>Add user</h3>
+        <h2>Add user</h2>
         <div class="inline-form">
           <div class="field"><label>Username</label><input class="in" id="newUser" placeholder="username" /></div>
           <div class="field"><label>Password</label><input class="in" id="newPass" type="password" placeholder="min 6 chars" /></div>
           <div class="field"><label>Role</label><select class="in" id="newRole"><option value="admin">Admin</option><option value="manager">Manager</option><option value="viewer">Viewer</option></select></div>
-          <button class="btn primary" id="addUserBtn">＋ Create user</button>
+          <button class="btn primary" id="addUserBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"></use></svg>Create user</button>
         </div>
       </div>
       <div class="card tablewrap admin-only" id="usersTableCard" style="margin-bottom:18px"><table id="usersTable"></table></div>
 
       <div class="card admin-only" id="grantsCard" style="margin-bottom:18px">
-        <h3>Session access grants · give managers / viewers specific sessions</h3>
+        <h2>Session access grants: give managers and viewers specific sessions</h2>
         <div class="inline-form" style="margin-bottom:14px">
           <div class="field"><label>User</label><select class="in" id="grantUser"></select></div>
           <div class="field"><label>Session</label><select class="in" id="grantSession"></select></div>
-          <button class="btn primary" id="addGrantBtn">＋ Grant access</button>
+          <button class="btn primary" id="addGrantBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"></use></svg>Grant access</button>
         </div>
         <div class="tablewrap"><table id="grantsTable"></table></div>
       </div>
@@ -291,11 +322,11 @@
     <section id="view-license" class="view hide">
       <div class="card" id="licenseStatusCard" style="margin-bottom:18px"></div>
       <div class="card" id="licenseActivateCard">
-        <h3>Activate / change license key</h3>
+        <h2>Activate / change license key</h2>
         <div class="inline-form">
           <div class="field" style="flex:1"><label>License key</label><input class="in" id="licenseKey" placeholder="SONAR-XXXX-XXXX-XXXX-XXXX" /></div>
           <button class="btn primary" id="activateBtn">Activate</button>
-          <button class="btn" id="refreshLicenseBtn">↻ Re-check now</button>
+          <button class="btn" id="refreshLicenseBtn"><svg class="i" aria-hidden="true"><use href="#i-refresh"></use></svg>Re-check now</button>
         </div>
       </div>
     </section>
@@ -319,32 +350,36 @@
 <div class="profile-pop" id="profilePop">
   <div class="phead">
     <div class="pav" id="popAv">?</div>
-    <div><div class="pname" id="popName">—</div><div class="prole" id="popRole">—</div></div>
+    <div><div class="pname" id="popName"></div><div class="prole" id="popRole"></div></div>
   </div>
-  <h4>Change my password</h4>
+  <h3>Change my password</h3>
   <div class="field"><input class="in" id="curPass" type="password" placeholder="Current password" autocomplete="current-password" /></div>
   <div class="field"><input class="in" id="nxtPass" type="password" placeholder="New password (min 6)" autocomplete="new-password" /></div>
   <div class="prow">
     <button class="btn primary" id="changePassBtn">Update password</button>
   </div>
   <div class="prow">
-    <button class="btn danger" id="logoutBtn">⎋ Sign out</button>
+    <button class="btn danger" id="logoutBtn"><svg class="i" aria-hidden="true"><use href="#i-logout"></use></svg>Sign out</button>
   </div>
 </div>
 
 <!-- LOGIN GATE -->
 <div class="login-screen" id="loginScreen">
-  <div class="login-card">
-    <img class="login-logo theme-light-only" src="/assets/logo-light.png" alt="Sonar" />
-    <img class="login-logo theme-dark-only" src="/assets/logo-dark.png" alt="Sonar" />
-    <p class="login-sub">Sign in to continue</p>
-    <form id="loginForm">
-      <div class="field"><label>Username</label><input class="in" id="loginUser" autocomplete="username" autofocus /></div>
-      <div class="field"><label>Password</label><input class="in" id="loginPass" type="password" autocomplete="current-password" /></div>
-      <button class="btn primary" type="submit" id="loginBtn" style="width:100%;justify-content:center;text-align:center">Sign in</button>
-      <div class="login-error" id="loginError"></div>
-    </form>
+  <div class="login-stage">
+    <img class="login-logo" src="/assets/logo-dark.png" alt="Sonar" width="1270" height="491" />
+    <div class="login-card">
+      <h1 class="login-title">Sign in</h1>
+      <p class="login-sub">Use the account your administrator created.</p>
+      <form id="loginForm">
+        <div class="field"><label for="loginUser">Username</label><input class="in" id="loginUser" autocomplete="username" autofocus /></div>
+        <div class="field"><label for="loginPass">Password</label><input class="in" id="loginPass" type="password" autocomplete="current-password" /></div>
+        <button class="btn primary" type="submit" id="loginBtn">Sign in</button>
+        <div class="login-error" id="loginError" role="alert"></div>
+      </form>
+    </div>
+    <p class="login-note"><svg class="i" aria-hidden="true"><use href="#i-eye"></use></svg>Observe only. Sonar never sends a message.</p>
   </div>
+  <p class="login-foot">Use only on accounts you own or are authorised to monitor, and respect WhatsApp’s Terms of Service.</p>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
