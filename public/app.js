@@ -23,6 +23,7 @@ const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/K
 const fmtClock = (ts) => new Date(ts).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
 const initials = (s) => (s || '?').replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '#'
 const esc = (s) => (s ?? '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const ic = (n) => `<svg class="i" aria-hidden="true"><use href="#i-${n}"></use></svg>` // line icons from the sprite in index.html
 
 /* ---------- theme ---------- */
 function applyTheme(t) {
@@ -90,14 +91,14 @@ function initSocket() {
     if (state.view === 'dashboard') renderFeed()
     if (state.view === 'chats' && m.sessionId === state.chatSession && m.chat_jid === state.chatJid) loadMessages()
   })
-  socket.on('alert', (a) => toast(`⚑ <b>${esc(a.keyword)}</b> in ${esc(a.chatName)}<br><span style="font-weight:500;color:var(--ink-soft)">${esc(a.text.slice(0, 90))}</span>`, 'alert'))
+  socket.on('alert', (a) => toast(`${ic('bell')}<div><b>${esc(a.keyword)}</b> in ${esc(a.chatName)}<br><span style="font-weight:500;color:var(--ink-soft)">${esc(a.text.slice(0, 90))}</span></div>`, 'alert'))
   socket.on('license', () => { refreshLicenseBanner(); if (state.view === 'license') render('license') })
   socket.on('newgroup', (g) => {
     if (!isAdminish()) return // pending-group alerts are an admin concern
     if (state.newGroups.some(x => x.jid === g.jid && x.sessionId === g.sessionId)) return
     state.newGroups.unshift(g)
     const sname = (state.sessions.find(s => s.id === g.sessionId) || {}).name || 'a session'
-    toast(`👥 New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to start monitoring it.</span>`, 'alert')
+    toast(`${ic('users')}<div>New group joined on ${esc(sname)}: <b>${esc(g.subject)}</b><br><span style="font-weight:500;color:var(--ink-soft)">Open the Dashboard to start monitoring it.</span></div>`, 'alert')
     renderNewGroupBanner(); updateNewGroupBadge()
   })
 }
@@ -110,7 +111,7 @@ function refreshChrome() {
   const open = state.sessions.filter(s => (s.live || s.status) === 'open').length
   if (state.sessions.length === 0) { dot.className = 'dot idle'; txt.textContent = 'No sessions yet' }
   else if (any('reconnecting') || any('connecting')) { dot.className = 'dot warn'; txt.textContent = 'Auto-recovering…' }
-  else if (open === state.sessions.length) { dot.className = 'dot ok'; txt.textContent = `${open} connected · silent` }
+  else if (open === state.sessions.length) { dot.className = 'dot ok'; txt.textContent = `${open} connected, silent` }
   else { dot.className = 'dot ok'; txt.textContent = `${open}/${state.sessions.length} connected` }
 }
 
@@ -199,11 +200,11 @@ function renderNewGroupBanner() {
   const nameById = Object.fromEntries(state.sessions.map(s => [s.id, s.name]))
   if (!state.newGroups.length) { el.classList.add('hide'); el.innerHTML = ''; return }
   el.classList.remove('hide')
-  el.innerHTML = `<h3 style="margin-bottom:12px">👥 New group${state.newGroups.length > 1 ? 's' : ''} joined <span class="pill" style="font-size:11.5px"><span class="dot warn"></span>${state.newGroups.length}</span></h3>
+  el.innerHTML = `<h3 style="margin-bottom:12px">${ic('users')}New group${state.newGroups.length > 1 ? 's' : ''} joined <span class="pill" style="font-size:11.5px"><span class="dot warn"></span>${state.newGroups.length}</span></h3>
     <div style="display:flex;flex-direction:column;gap:10px">${
     state.newGroups.map(g => `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:12px">
-      <div style="flex:1;min-width:180px"><b>${esc(g.subject)}</b> <span style="color:var(--ink-faint);font-size:12.5px">· ${g.participants || 0} members · ${esc(nameById[g.sessionId] || g.sessionId)}</span></div>
-      <button class="btn primary" data-act="addgroupwatch" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">＋ Monitor this group</button>
+      <div style="flex:1;min-width:180px"><b>${esc(g.subject)}</b> <span class="hmeta" style="color:var(--ink-faint);font-size:13px;margin-left:12px"><span>${g.participants || 0} members</span><span>${esc(nameById[g.sessionId] || g.sessionId)}</span></span></div>
+      <button class="btn primary" data-act="addgroupwatch" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">${ic('plus')}Monitor this group</button>
       <button class="btn" data-act="dismissgroup" data-jid="${esc(g.jid)}" data-sid="${esc(g.sessionId)}">Dismiss</button>
     </div>`).join('')}</div>`
 }
@@ -248,7 +249,7 @@ async function renderReports() {
     aiBtn.style.display = admin ? '' : 'none'
     aiBtn.onclick = async () => {
       if (!confirm('Generate an AI report now?\n\nThis calls the Claude API and incurs cost. The result is saved under "Saved AI reports" below, where you can open or download it anytime without regenerating.')) return
-      status.dataset.busy = '1'; status.textContent = '⏳ Generating AI report… this can take up to a minute.'; aiBtn.disabled = true
+      status.dataset.busy = '1'; status.textContent = 'Generating AI report… this can take up to a minute.'; aiBtn.disabled = true
       try {
         const r = await post('/reports?days=' + encodeURIComponent(daysSel.value || 'all'), {})
         status.dataset.busy = ''
@@ -273,8 +274,8 @@ async function loadSavedReports() {
       <td>${esc(x.created_by || '')}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn" data-act="viewreport" data-id="${x.id}">View</button>
-        <a class="btn" href="/api/reports/${x.id}?download=1">⬇</a>
-        <button class="btn danger" data-act="delreport" data-id="${x.id}">🗑</button>
+        <a class="btn" href="/api/reports/${x.id}?download=1" aria-label="Download" title="Download">${ic('download')}</a>
+        <button class="btn danger" data-act="delreport" data-id="${x.id}" aria-label="Delete" title="Delete">${ic('trash')}</button>
       </td></tr>`).join('') : '<tr><td colspan="5"><div class="empty">No AI reports yet — click "Generate AI report".</div></td></tr>'}</tbody>`
 }
 window.viewReport = (id) => { const f = $('#reportFrame'); if (f) f.src = '/api/reports/' + id + '?t=' + Date.now() }
@@ -291,21 +292,21 @@ async function renderEmails() {
   if (!r || !r.ok) return
   const s = r.schedule || {}
   const smtp = s.smtpConfigured
-    ? `<span class="pill" style="font-size:11.5px"><span class="dot ok"></span>SMTP ready${s.from ? ' · ' + esc(s.from) : ''}</span>`
+    ? `<span class="pill" style="font-size:11.5px"><span class="dot ok"></span>SMTP ready${s.from ? ', ' + esc(s.from) : ''}</span>`
     : `<span class="pill" style="font-size:11.5px"><span class="dot bad"></span>Email not configured — contact your administrator</span>`
   $('#scheduleCard').innerHTML = `
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <div><h3 style="margin:0">Daily report schedule</h3>
         <div style="font-size:13px;color:var(--ink-soft);margin-top:4px">
-          ${s.enabled ? `Runs daily at <b>${esc(s.timesLabel || '')}</b> (${esc(s.tz)}) · each run covers the last 24 hours · next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b>.'}
+          ${s.enabled ? `Runs daily at <b>${esc(s.timesLabel || '')}</b> (${esc(s.tz)}). Each run covers the last 24 hours. Next: <b>${esc(s.nextRunLabel || '—')}</b>` : 'Scheduler is <b>disabled</b>.'}
         </div>
         <div style="margin-top:8px">${smtp}</div>
       </div>
-      <div style="margin-left:auto"><button class="btn" id="runNowBtn">▶ Generate &amp; send now</button></div>
+      <div style="margin-left:auto"><button class="btn" id="runNowBtn">${ic('play')}Generate &amp; send now</button></div>
     </div>
     <div class="inline-form" style="margin-top:14px;align-items:flex-end">
       <div class="field" style="flex:1"><label>Send a SAMPLE report to (optional — blank = all enabled recipients)</label><input class="in" id="testEmail" placeholder="you@company.com" /></div>
-      <button class="btn primary" id="sendTestBtn">✉ Send sample report</button>
+      <button class="btn primary" id="sendTestBtn">${ic('send')}Send sample report</button>
     </div>
     <p style="margin-top:10px;font-size:12.5px;color:var(--ink-faint)"><b>Send sample report</b> emails a fully-populated demo report (charts + tables) — best for testing delivery &amp; format. <b>Generate &amp; send now</b> runs the real daily job on live data (saves under Reports).</p>`
   $('#runNowBtn').onclick = runReportNow
@@ -316,7 +317,7 @@ async function renderEmails() {
     rows.length ? rows.map(e => `<tr>
       <td><b>${esc(e.email)}</b></td>
       <td>${esc(e.label || '')}</td>
-      <td>${e.enabled ? '<span class="pill" style="font-size:11px;background:var(--ok,#1c8f52);color:#fff">Enabled</span>' : '<span class="pill" style="font-size:11px;background:#9aa6b2;color:#fff">Disabled</span>'}</td>
+      <td>${e.enabled ? '<span class="pill tone-ok">Enabled</span>' : '<span class="pill tone-mute">Disabled</span>'}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn" data-act="toggleemail" data-id="${e.id}" data-on="${e.enabled ? 0 : 1}">${e.enabled ? 'Disable' : 'Enable'}</button>
         <button class="btn danger" data-act="delemail" data-id="${e.id}">Remove</button>
@@ -342,17 +343,17 @@ async function runReportNow() {
       else toast(`Report #${r.id} saved & emailed to ${r.emailed}/${r.recipients} recipient(s).`)
     } else toast((r && r.error) || 'Run failed', 'err')
   } catch { toast('Run failed', 'err') }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '▶ Generate & send now' }; renderEmails() }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = ic('play') + 'Generate &amp; send now' }; renderEmails() }
 }
 async function sendTestReport() {
   const to = $('#testEmail').value.trim()
   const btn = $('#sendTestBtn'); if (btn) { btn.disabled = true; btn.textContent = '… sending' }
   try {
     const r = await post('/report-emails/send-test', to ? { to } : {})
-    if (r && r.ok) toast(`Sample report emailed to ${esc((r.to || []).join(', '))} ✓`)
+    if (r && r.ok) toast(`Sample report emailed to ${esc((r.to || []).join(', '))}`)
     else toast((r && r.error) || 'Send failed', 'err')
   } catch { toast('Send failed', 'err') }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '✉ Send sample report' } }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = ic('send') + 'Send sample report' } }
 }
 
 /* ---------- SCHEDULER ---------- */
@@ -380,7 +381,7 @@ async function renderScheduler() {
   const freqLabel = { 1: 'every day', 3: 'every 3 days', 7: 'weekly', 30: 'monthly', 365: 'yearly' }[c.intervalDays] || `every ${c.intervalDays} days`
   $('#schedNextCard').innerHTML = `<h3 style="margin:0">Next run</h3>
     <div style="font-size:13px;color:var(--ink-soft);margin-top:6px">
-      ${s.enabled ? `<b>${esc(s.nextRunLabel || '—')}</b> (${esc(s.tz)}) · runs <b>${esc(freqLabel)}</b> at <b>${esc((c.times || []).join(', '))}</b> · each report covers the last <b>${c.windowDays}</b> day(s)` : 'Scheduler is <b>disabled</b>.'}
+      ${s.enabled ? `<b>${esc(s.nextRunLabel || '—')}</b> (${esc(s.tz)}). Runs <b>${esc(freqLabel)}</b> at <b>${esc((c.times || []).join(', '))}</b>. Each report covers the last <b>${c.windowDays}</b> day(s)` : 'Scheduler is <b>disabled</b>.'}
       <span style="margin-left:10px">${s.smtpConfigured ? '<span class="pill" style="font-size:11px"><span class="dot ok"></span>SMTP ready</span>' : '<span class="pill" style="font-size:11px"><span class="dot bad"></span>SMTP off</span>'}</span>
     </div>`
   $('#saveSchedBtn').onclick = saveSchedule
@@ -440,14 +441,14 @@ async function renderSessions() {
       </div>
       <div class="btn-row">
         ${canWrite() ? (stopped
-          ? `<button class="btn primary" data-act="sess" data-id="${s.id}" data-op="resume">▶ Resume</button>`
-          : `<button class="btn" data-act="sess" data-id="${s.id}" data-op="restart">↻ Restart</button>
-             <button class="btn gold" data-act="sess" data-id="${s.id}" data-op="stop">■ Stop</button>`) : ''}
+          ? `<button class="btn primary" data-act="sess" data-id="${s.id}" data-op="resume">${ic('play')}Resume</button>`
+          : `<button class="btn" data-act="sess" data-id="${s.id}" data-op="restart">${ic('refresh')}Restart</button>
+             <button class="btn gold" data-act="sess" data-id="${s.id}" data-op="stop">${ic('stop')}Stop</button>`) : ''}
         ${isSuper() ? `<button class="btn" data-act="watchall" data-id="${s.id}" data-val="${s.watch_all ? 0 : 1}">${s.watch_all ? 'Watch listed only' : 'Watch all'}</button>` : ''}
         ${!isSuper() ? `<span class="pill" style="font-size:11.5px"><span class="dot ${s.watch_all ? 'warn' : 'idle'}"></span>${s.watch_all ? 'Watching ALL' : 'Listed only'}</span>` : ''}
-        ${isAdminish() ? `<button class="btn ghost" data-act="sess" data-id="${s.id}" data-op="logout">⎋ New QR</button>
-        <button class="btn danger" data-act="delsess" data-id="${s.id}" data-name="${esc(s.name)}">🗑 Delete</button>` : ''}
-        ${!canWrite() ? '<span style="font-size:13px;color:var(--ink-faint)">🔒 Read-only access</span>' : ''}
+        ${isAdminish() ? `<button class="btn ghost" data-act="sess" data-id="${s.id}" data-op="logout">${ic('qr')}New QR</button>
+        <button class="btn danger" data-act="delsess" data-id="${s.id}" data-name="${esc(s.name)}">${ic('trash')}Delete</button>` : ''}
+        ${!canWrite() ? `<span style="font-size:13px;color:var(--ink-faint);display:inline-flex;gap:6px;align-items:center">${ic('lock')}Read-only access</span>` : ''}
       </div>
     </div>`
   }).join('')
@@ -546,13 +547,13 @@ async function loadMessages() {
         <div class="hav">${initials(name)}</div>
         <div style="min-width:0">
           <div class="hname">${esc(name)}</div>
-          <div class="hmeta">${isGroup ? 'Group' : 'Direct'} · ${messages.length} messages · read-only</div>
+          <div class="hmeta"><span>${isGroup ? 'Group' : 'Direct'}</span><span>${messages.length} messages</span><span>read-only</span></div>
         </div>
       </div>
       <div class="hactions">
-        <a class="btn" href="${exportBase}&fmt=txt">⬇ Export .txt</a>
-        <a class="btn ghost" href="${exportBase}&fmt=json">{ } JSON</a>
-        ${isAdminish() ? `<button class="btn danger" data-act="dellog" data-jid="${esc(state.chatJid)}">🗑 Delete log</button>` : ''}
+        <a class="btn" href="${exportBase}&fmt=txt">${ic('download')}Export .txt</a>
+        <a class="btn ghost" href="${exportBase}&fmt=json">JSON</a>
+        ${isAdminish() ? `<button class="btn danger" data-act="dellog" data-jid="${esc(state.chatJid)}">${ic('trash')}Delete log</button>` : ''}
       </div>
     </div>`
   const box = $('#chatMessages')
@@ -565,7 +566,7 @@ async function loadMessages() {
       ${!mine && isGroup ? `<div class="who" style="color:${senderColor(m.sender_name)}">${esc(m.sender_name)}</div>` : ''}
       ${m.quoted_text ? `<div class="qt">${esc(m.quoted_text)}</div>` : ''}
       <div class="tx">${esc(m.text)}</div>
-      <div class="tm">${fmtClock(m.ts)}${m.has_media ? ' · 📎' : ''}${mine ? ' · you' : ''}</div>
+      <div class="tm">${fmtClock(m.ts)}${m.has_media ? ' ' + ic('clip') : ''}${mine ? '&nbsp; you' : ''}</div>
     </div>`
   }
   box.innerHTML = html || '<div class="empty">No messages.</div>'
@@ -659,8 +660,8 @@ $('#fetchGroupsBtn').onclick = async () => {
     if (!r.ok) return toast(r.error || 'Could not fetch groups', 'err')
     if (!r.groups.length) { sel.innerHTML = '<option value="">No groups found</option>'; return toast('No groups on this session') }
     // Mark which groups are already on the watchlist. Match tolerantly (ignore
-    // case/spacing/punctuation) so a hand-typed entry like "D Decor…" still
-    // registers against the real "D'Decor…" group instead of misreading ⚠.
+    // case/spacing/punctuation) so a hand-typed entry like "Acme Traders…" still
+    // registers against the real "Acme-Traders…" group instead of misreading it.
     const wr = await api('/watch?sid=' + encodeURIComponent(sid))
     const watchedKeys = new Set((wr.ok ? wr.watch : []).filter(w => w.kind === 'group').map(w => looseGroup(w.value)))
     const rows = r.groups.map(g => ({ ...g, watched: watchedKeys.has(looseGroup(g.subject)) }))
@@ -673,7 +674,7 @@ $('#fetchGroupsBtn').onclick = async () => {
         const tail = g.watched ? '' : ' — not monitored'
         return `<option value="${esc(g.subject)}">${mark} ${esc(g.subject)} (${g.participants})${tail}</option>`
       }).join('')
-    toast(pending ? `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · ⚠ ${pending} not monitored` : `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''} · all monitored`)
+    toast(pending ? `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''}, ${pending} not monitored` : `Loaded ${r.groups.length} group${r.groups.length > 1 ? 's' : ''}, all monitored`)
   } finally { btn.disabled = false; btn.textContent = label }
 }
 $('#watchGroupSelect').onchange = (e) => {
@@ -712,38 +713,37 @@ async function renderHealth() {
 async function renderFiles() {
   const { files } = await api('/logs')
   $('#filesTable').innerHTML = `<thead><tr><th>File</th><th>Size</th><th></th></tr></thead><tbody>${
-    files.length ? files.map(f => `<tr><td><b>${esc(f.name)}</b></td><td>${(f.size / 1024).toFixed(1)} KB</td><td><a class="btn" href="/logs/${encodeURIComponent(f.name)}" download>⬇ Download</a></td></tr>`).join('')
+    files.length ? files.map(f => `<tr><td><b>${esc(f.name)}</b></td><td>${(f.size / 1024).toFixed(1)} KB</td><td><a class="btn" href="/logs/${encodeURIComponent(f.name)}" download>${ic('download')}Download</a></td></tr>`).join('')
     : '<tr><td colspan="3"><div class="empty">No .txt logs yet — they appear once group messages arrive.</div></td></tr>'}</tbody>`
 }
 
 /* ---------- ABOUT (showcase) ---------- */
 function renderAbout() {
   const pillars = [
-    ['🔭', 'Read-only by design', 'Never sends a message, receipt, or presence. Purely passive — like sonar that detects without emitting.'],
-    ['🔌', 'Multi-session', 'Link unlimited WhatsApp devices, each with its own QR. One dashboard for all of them.'],
-    ['🎯', 'Targeted capture', 'Watch only the groups & numbers you choose — captured in both directions, nothing else stored.'],
-    ['♻️', 'Self-healing', 'Reconnects through every WhatsApp disconnect code. Recovery is always under three minutes.'],
-    ['🔐', 'RBAC + audit', 'Four roles, per-session access grants, and a full audit trail of every login and action.'],
-    ['🔑', 'Licensed & hardened', 'Ed25519 machine-bound licensing, server-side enforcement, optional bytecode build.'],
+    ['eye', 'Read-only by design', 'Never sends a message, receipt, or presence. Purely passive — like sonar that detects without emitting.'],
+    ['phone', 'Multi-session', 'Link unlimited WhatsApp devices, each with its own QR. One dashboard for all of them.'],
+    ['target', 'Targeted capture', 'Watch only the groups & numbers you choose — captured in both directions, nothing else stored.'],
+    ['refresh', 'Self-healing', 'Reconnects through every WhatsApp disconnect code. Recovery is always under three minutes.'],
+    ['shield', 'RBAC + audit', 'Four roles, per-session access grants, and a full audit trail of every login and action.'],
+    ['key', 'Licensed & hardened', 'Ed25519 machine-bound licensing, server-side enforcement, optional bytecode build.'],
   ]
   $('#aboutCard').innerHTML = `
   <div class="about">
     <div class="about-hero reveal">
       <img class="about-logo theme-light-only" src="/assets/logo-light.png" alt="Sonar" />
       <img class="about-logo theme-dark-only" src="/assets/logo-dark.png" alt="Sonar" />
-      <div class="about-title">Sonar</div>
       <div class="about-tag">Read-only WhatsApp intelligence</div>
       <p class="about-lead">Watch every conversation. Send nothing. Miss nothing. Sonar links your WhatsApp devices, captures exactly the groups and numbers you choose, and keeps a permanent, searchable archive — all without ever emitting a single signal.</p>
       <div class="about-badges">
-        <span>🔭 Observe-only</span><span>♻️ Self-healing</span><span>🗂️ Permanent archive</span><span>🛡️ Audited</span>
+        <span>Observe-only</span><span>Self-healing</span><span>Permanent archive</span><span>Audited</span>
       </div>
     </div>
 
     <div class="grid cols-3">
-      ${pillars.map(([ic, h, p]) => `<div class="card pillar"><div class="pico">${ic}</div><h4>${h}</h4><p>${p}</p></div>`).join('')}
+      ${pillars.map(([icon, h, p]) => `<div class="card pillar"><div class="pico">${ic(icon)}</div><h4>${h}</h4><p>${p}</p></div>`).join('')}
     </div>
 
-    <div class="about-ribbon"><span class="dot"></span> 100% read-only — Sonar never sends messages, read receipts, or presence.</div>
+    <div class="about-ribbon">${ic('lock')}100% read-only. Sonar never sends messages, read receipts, or presence.</div>
 
     <div class="about-foot">
       Use only on accounts you own or are authorised to monitor, and respect WhatsApp's Terms of Service.
@@ -757,8 +757,8 @@ async function renderAudit() {
   const d = await api('/audit?limit=500')
   const s = d.stats || {}
   $('#auditStats').innerHTML = [
-    ['Logins · 24h', s.logins24h || 0], ['Active now', s.active || 0],
-    ['Actions · 24h', s.actions24h || 0], ['Users', s.users || 0],
+    ['Logins (24h)', s.logins24h || 0], ['Active now', s.active || 0],
+    ['Actions (24h)', s.actions24h || 0], ['Users', s.users || 0],
   ].map(([l, v]) => `<div class="card stat"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('')
 
   $('#activeTable').innerHTML = `<thead><tr><th>User</th><th>IP</th><th>Logged in</th><th>Duration</th><th>Last seen</th></tr></thead><tbody>${
@@ -770,7 +770,7 @@ async function renderAudit() {
     : '<tr><td colspan="6"><div class="empty">No login history.</div></td></tr>'}</tbody>`
 
   $('#auditTable').innerHTML = `<thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>IP</th></tr></thead><tbody>${
-    d.audit.length ? d.audit.map(a => `<tr><td style="white-space:nowrap">${fmtTime(a.ts)}</td><td><b>${esc(a.username)}</b></td><td><span class="chip" style="padding:3px 9px;font-size:12px">${esc(a.action)}</span></td><td>${esc(a.target || '')} ${a.detail ? '<span style="color:var(--ink-faint)">· ' + esc(a.detail) + '</span>' : ''}</td><td style="font-size:12px;color:var(--ink-faint)">${esc(a.ip)}</td></tr>`).join('')
+    d.audit.length ? d.audit.map(a => `<tr><td style="white-space:nowrap">${fmtTime(a.ts)}</td><td><b>${esc(a.username)}</b></td><td><span class="chip" style="padding:3px 9px;font-size:12px">${esc(a.action)}</span></td><td>${esc(a.target || '')} ${a.detail ? '<span style="color:var(--ink-faint);margin-left:8px">' + esc(a.detail) + '</span>' : ''}</td><td style="font-size:12px;color:var(--ink-faint)">${esc(a.ip)}</td></tr>`).join('')
     : '<tr><td colspan="5"><div class="empty">No actions yet.</div></td></tr>'}</tbody>`
 }
 
@@ -781,11 +781,11 @@ async function renderUsers() {
   if (!isAdminish()) return
   const { users } = await api('/users')
   $('#usersTable').innerHTML = `<thead><tr><th>User</th><th>Role</th><th>Created</th><th>Last login</th><th></th></tr></thead><tbody>${
-    users.length ? users.map(u => `<tr><td><b>${esc(u.username)}</b></td><td><span class="chip" style="padding:3px 9px;font-size:12px">${ROLE_LABEL[u.role] || u.role}</span></td><td>${u.created_at ? fmtTime(u.created_at) : '—'}</td><td>${u.last_login ? fmtTime(u.last_login) : '—'}</td><td style="text-align:right">${u.id === state.me.id ? '<span style="color:var(--ink-faint)">you</span>' : `<button class="btn" data-act="resetpw" data-id="${u.id}" data-name="${esc(u.username)}">🔑 Reset password</button> <button class="btn danger" data-act="deluser" data-id="${u.id}">Remove</button>`}</td></tr>`).join('') : '<tr><td colspan="5"><div class="empty">No users yet — add one above.</div></td></tr>'}</tbody>`
+    users.length ? users.map(u => `<tr><td><b>${esc(u.username)}</b></td><td><span class="chip" style="padding:3px 9px;font-size:12px">${ROLE_LABEL[u.role] || u.role}</span></td><td>${u.created_at ? fmtTime(u.created_at) : '—'}</td><td>${u.last_login ? fmtTime(u.last_login) : '—'}</td><td style="text-align:right">${u.id === state.me.id ? '<span style="color:var(--ink-faint)">you</span>' : `<button class="btn" data-act="resetpw" data-id="${u.id}" data-name="${esc(u.username)}">${ic('key')}Reset password</button> <button class="btn danger" data-act="deluser" data-id="${u.id}">Remove</button>`}</td></tr>`).join('') : '<tr><td colspan="5"><div class="empty">No users yet — add one above.</div></td></tr>'}</tbody>`
 
   // grants
   const g = await api('/grants')
-  $('#grantUser').innerHTML = g.users.length ? g.users.map(u => `<option value="${u.id}">${esc(u.username)} · ${ROLE_LABEL[u.role]}</option>`).join('') : '<option value="">No manager/viewer users yet</option>'
+  $('#grantUser').innerHTML = g.users.length ? g.users.map(u => `<option value="${u.id}">${esc(u.username)} (${ROLE_LABEL[u.role]})</option>`).join('') : '<option value="">No manager/viewer users yet</option>'
   $('#grantSession').innerHTML = g.sessions.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')
   $('#grantsTable').innerHTML = `<thead><tr><th>User</th><th>Role</th><th>Session</th><th>Granted by</th><th></th></tr></thead><tbody>${
     g.grants.length ? g.grants.map(x => `<tr><td><b>${esc(x.username || '—')}</b></td><td>${ROLE_LABEL[x.role] || x.role || ''}</td><td>${esc(x.session_name || x.session_id)}</td><td style="color:var(--ink-faint)">${esc(x.granted_by || '')}</td><td><button class="btn danger" data-act="delgrant" data-id="${x.id}">Revoke</button></td></tr>`).join('') : '<tr><td colspan="5"><div class="empty">No grants yet. Managers/viewers see nothing until granted a session.</div></td></tr>'}</tbody>`
@@ -827,21 +827,21 @@ const LIC_LABEL = { active: 'Active', disabled: 'Not enforced (dev)', unlicensed
 function licBannerText(l) {
   if (!l || !l.enabled || l.status === 'active' || l.status === 'disabled') return null
   const map = {
-    unlicensed: '🔑 No license activated — WhatsApp sessions are stopped. Activate a license to start monitoring.',
-    expired: '⛔ License expired — all sessions are stopped. Renew to resume.',
-    revoked: '⛔ License revoked — all sessions are stopped.',
-    grace_over: '⛔ License server unreachable past the offline limit — sessions stopped. Reconnect to the server.',
-    invalid: '⛔ License invalid for this machine — sessions stopped.',
-    tampered: '⛔ License state tampered — sessions stopped. Re-activate.',
+    unlicensed: 'No license activated. WhatsApp sessions are stopped. Activate a license to start monitoring.',
+    expired: 'License expired. All sessions are stopped. Renew to resume.',
+    revoked: 'License revoked. All sessions are stopped.',
+    grace_over: 'License server unreachable past the offline limit. Sessions stopped. Reconnect to the server.',
+    invalid: 'License invalid for this machine. Sessions stopped.',
+    tampered: 'License state tampered. Sessions stopped. Re-activate.',
   }
-  return map[l.status] || ('⛔ License ' + l.status + ' — sessions stopped.')
+  return map[l.status] || ('License ' + l.status + '. Sessions stopped.')
 }
 async function refreshLicenseBanner() {
   try {
     const { license } = await api('/license/status')
     state.license = license
     const el = $('#licenseBanner'); const txt = licBannerText(license)
-    if (txt) { el.textContent = txt; el.classList.toggle('bad', license.status !== 'unlicensed'); el.classList.remove('hide') }
+    if (txt) { el.innerHTML = ic('alert') + '<span>' + esc(txt) + '</span>'; el.classList.toggle('bad', license.status !== 'unlicensed'); el.classList.remove('hide') }
     else el.classList.add('hide')
   } catch {}
 }
@@ -972,7 +972,7 @@ $('#globalSearch').oninput = (e) => {
     if (q.length < 2) return
     const { messages } = await api('/search?q=' + encodeURIComponent(q))
     go('chats')
-    $('#chatList').innerHTML = `<div style="padding:10px;font-weight:800">Search: "${esc(q)}" · ${messages.length}</div>` +
+    $('#chatList').innerHTML = `<div style="padding:8px 12px 12px;font-weight:600;font-size:14px">Search "${esc(q)}": ${messages.length} result${messages.length === 1 ? '' : 's'}</div>` +
       messages.slice(0, 200).map(m => `<div class="chat-item" data-act="openchat" data-sid="${esc(m.session_id)}" data-jid="${esc(m.chat_jid)}">
         <div class="av">${initials(m.chat_name)}</div><div style="flex:1;min-width:0">
         <div class="row1"><span class="nm">${esc(m.chat_name)}</span><span class="tm">${fmtTime(m.ts)}</span></div>
